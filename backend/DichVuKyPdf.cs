@@ -152,8 +152,13 @@ public sealed class DichVuKyPdf(IConfiguration config)
                     var properties=signer.GetSignerProperties();
                     properties.SetPageNumber(viTri.Trang).SetPageRect(rect);
                     var appearance=new SignatureFieldAppearance(field);
-                    if(viTri.AnhPng!=null)
-                        appearance.SetContent(viTri.Nhan,ImageDataFactory.Create(viTri.AnhPng));
+                    if(viTri.AnhPng!=null){
+                        var image=ImageDataFactory.Create(viTri.AnhPng);
+                        // Individual signatures use image-only content, matching the drag-and-drop preview.
+                        // The agency seal also carries the official issue number in the same signature field.
+                        if(label=="KY_CO_QUAN")appearance.SetContent(viTri.Nhan,image);
+                        else appearance.SetContent(image);
+                    }
                     else appearance.SetContent(viTri.Nhan);
                     properties.SetSignatureAppearance(appearance);
                 }

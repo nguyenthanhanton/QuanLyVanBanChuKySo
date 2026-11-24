@@ -12,6 +12,7 @@ import {
 import { demoDocuments, demoUsers } from './demo';
 import type { Actor, ChuyenPhat, SuKien, Trang, TrangThai, VanBan } from './types';
 import { formatDate, stageLabel, transferLabel } from './types';
+import SignaturePlacement, { type SignaturePosition } from './SignaturePlacement';
 
 const DEMO = import.meta.env.VITE_DEMO_MODE !== 'false';
 const APP_TITLE = 'Văn thư số';
@@ -233,6 +234,10 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
   const [signatureWidth,setSignatureWidth]=useState(32);
   const [signatureHeight,setSignatureHeight]=useState(11);
   const [signedPreview,setSignedPreview]=useState(false);
+  const [placementOpen,setPlacementOpen]=useState(false);
+  const [placementConfirmed,setPlacementConfirmed]=useState(false);
+  const [mainPdfPath,setMainPdfPath]=useState('');
+  const [placementError,setPlacementError]=useState('');
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [verify,setVerify]=useState<Record<string,unknown>|null>(null);
@@ -242,6 +247,17 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
     requestApi('/signing-credentials',token).then((x:Record<string,unknown>[])=>setCredentials(x)).catch(()=>{});
     requestApi(`/documents/${doc.id}/signatures/verification`,token).then((x:Record<string,unknown>)=>setVerify(x)).catch(()=>{});
   },[doc.id,token]);
+  useEffect(()=>{
+    if(DEMO||!token)return;
+    let alive=true;
+    setMainPdfPath('');setPlacementError('');setPlacementConfirmed(false);
+    requestApi(`/documents/${doc.id}/attachments`,token).then((files:Record<string,unknown>[])=>{
+      const main=files.find(file=>Boolean(field(file,'LaVanBanChinh')));
+      if(!main)throw new Error('Văn bản chưa có PDF chính.');
+      if(alive)setMainPdfPath(`/documents/${doc.id}/files/${String(field(main,'MaTep'))}`);
+    }).catch(err=>{if(alive)setPlacementError((err as Error).message);});
+    return ()=>{alive=false;};
+  },[doc.id,doc.version,token]);
   const operation=async(kind:'prepare'|'sign'|'draft-sign'|'agency-sign'|'publish'|'verify'|'download',signature?:string)=>{
     setBusy(true);setMessage('');
     try {
@@ -250,7 +266,10 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
       } else if(kind==='verify'){
         setVerify(await requestApi(`/documents/${doc.id}/signatures/verification`,token));
       } else {
-        if((kind==='sign'||kind==='draft-sign'||kind==='agency-sign')&&!accountPassword)throw new Error('Cần nhập mật khẩu để xác nhận ký.');
+        if(kind==='sign'||kind==='draft-sign'||kind==='agency-sign'){
+          if(!signatureImage||!placementConfirmed)throw new Error('Hãy chọn ảnh PNG, kéo đặt chữ ký trên PDF và xác nhận vị trí trước khi ký.');
+          if(!accountPassword)throw new Error('Cần nhập mật khẩu để xác nhận ký.');
+        }
         const endpoint=kind==='prepare'?`/documents/${doc.id}/prepared-pdf`:
           kind==='sign'?`/documents/${doc.id}/signatures`:
           kind==='draft-sign'?`/documents/${doc.id}/draft-signature`:
@@ -275,6 +294,7 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
           {maYeuCau:crypto.randomUUID()};
         await requestApi(endpoint,token,{method:'POST',body:JSON.stringify(payload)});
         setAccountPassword('');
+        setPlacementConfirmed(false);
         await onUpdated();
         try {setVerify(await requestApi(`/documents/${doc.id}/signatures/verification`,token));}catch{/* no signed PDF yet */}
         setMessage('Đã lưu thao tác và cập nhật hành trình trên máy chủ.');
@@ -300,7 +320,7 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
   const signatures=(field(verify??{},'ChuKy') as Record<string,unknown>[]|undefined)??[];
   return <section className="drawer-section signature-live">
     <div className="signature-header"><div className="signature-icon"><ShieldCheck size={30}/></div>
-      <h3>Ký số PDF và xác minh</h3><p>Ký CMS được nhúng vào PDF, lần lượt từng vai trò; không dùng ảnh chữ ký.</p></div>
+      <h3>Ký số PDF và xác minh</h3><p>Chữ ký CMS bảo đảm toàn vẹn; ảnh PNG chỉ là phần hiển thị trong vùng chữ ký số.</p></div>
     <div className="form-section"><h4>Chứng thư đang sử dụng</h4>
       {activeCreds.map(c=><div className="version-row" key={String(field(c,'MaChungThu'))}>
         <ShieldCheck size={18}/><div><strong>{String(field(c,'TenChungThu'))}</strong><span>{String(field(c,'LoaiChungThu'))} · {field(c,'NguonChungThu')==='TU_KY_THU_NGHIEM'?'Thử nghiệm nội bộ':'PFX nhập'} · Hết hạn {formatDate(String(field(c,'NgayHetHan')))}</span></div>
@@ -318,24 +338,25 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
         onClick={createCredential}>Lưu chứng thư</button></div>
     <div className="form-section"><h4>Các bước ký và phát hành</h4>
       {['NHAP','TRA_SUA','CHO_DUYET','DA_CAP_SO'].includes(doc.status)&&<div className="form-section">
-        <h4>Hình chữ ký và vị trí trên PDF (cho lần ký mới)</h4>
-        <p className="fine-note">Chọn PNG nền trong suốt, tối đa 1 MB. Tọa độ tính theo % từ mép trái và mép trên của trang PDF. Hệ thống nhúng ảnh vào vùng chữ ký CMS trong chính lần ký, không sửa PDF sau ký. Không hỗ trợ trang bị xoay.</p>
+        <h4>Xem PDF và kéo thả hình chữ ký trước khi ký</h4>
+        <p className="fine-note">1. Chọn ảnh PNG nền trong suốt tối đa 1 MB. 2. Nhấn “Mở PDF để đặt chữ ký”, kéo ảnh vào vị trí và chỉnh kích thước. 3. Xác nhận vị trí rồi mới nhấn ký số. Không hỗ trợ trang PDF xoay.</p>
         <label>Ảnh chữ ký / con dấu (PNG)
-          <input type="file" accept="image/png,.png" onChange={e=>setSignatureImage(e.target.files?.[0])}/>
+          <input type="file" accept="image/png,.png" onChange={e=>{setSignatureImage(e.target.files?.[0]);setPlacementConfirmed(false);}}/>
         </label>
-        <div className="form-grid">
-          <label>Trang đặt chữ ký<input type="number" min="1" step="1" value={signaturePage}
-            onChange={e=>setSignaturePage(Number(e.target.value))}/></label>
-          <label>Từ trái (%)<input type="number" min="0" max="100" step="1" value={signatureX}
-            onChange={e=>setSignatureX(Number(e.target.value))}/></label>
-          <label>Từ trên (%)<input type="number" min="0" max="100" step="1" value={signatureY}
-            onChange={e=>setSignatureY(Number(e.target.value))}/></label>
-          <label>Chiều rộng (%)<input type="number" min="1" max="100" step="1" value={signatureWidth}
-            onChange={e=>setSignatureWidth(Number(e.target.value))}/></label>
-          <label>Chiều cao (%)<input type="number" min="1" max="100" step="1" value={signatureHeight}
-            onChange={e=>setSignatureHeight(Number(e.target.value))}/></label>
-        </div>
-        <p className="fine-note">Vùng dự kiến: trang {signaturePage}, trái {signatureX}%, trên {signatureY}%, rộng {signatureWidth}%, cao {signatureHeight}%. Tránh che nội dung; kiểm tra trang PDF sau ký trước khi duyệt.</p>
+        {placementError&&<div className="form-error">{placementError}</div>}
+        <button className="primary small" disabled={busy||!signatureImage||!mainPdfPath}
+          onClick={()=>{setPlacementConfirmed(false);setPlacementOpen(true);}}>Mở PDF để đặt chữ ký</button>
+        {placementConfirmed?<p className="success-note">✓ Đã xác nhận vị trí: trang {signaturePage}, trái {signatureX.toFixed(1)}%, trên {signatureY.toFixed(1)}%. Có thể nhấn ký số.</p>:
+          <p className="fine-note">Chưa xác nhận vị trí ký. Hãy đặt ảnh trước khi ký.</p>}
+        {placementOpen&&signatureImage&&<SignaturePlacement
+          sourcePath={signatures.length>0?`/documents/${doc.id}/signed-pdf`:mainPdfPath}
+          token={token} image={signatureImage}
+          position={{page:signaturePage,x:signatureX,y:signatureY,width:signatureWidth,height:signatureHeight}}
+          onClose={()=>setPlacementOpen(false)} onConfirm={(value:SignaturePosition)=>{
+            setSignaturePage(value.page);setSignatureX(value.x);setSignatureY(value.y);
+            setSignatureWidth(value.width);setSignatureHeight(value.height);
+            setPlacementConfirmed(true);setPlacementOpen(false);
+          }}/>}
         <button className="secondary small" disabled={busy} onClick={()=>setSignedPreview(true)}>Xem PDF đã ký hiện tại</button>
         {signedPreview&&<FilePreview path={`/documents/${doc.id}/signed-pdf`} filename={`van-ban-${doc.code}.pdf`}
           token={token} onClose={()=>setSignedPreview(false)}/>}

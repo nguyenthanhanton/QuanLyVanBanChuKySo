@@ -66,3 +66,15 @@
 .preview-other{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px;text-align:center}
 .preview-text{flex:1;min-height:0;overflow:auto;padding:18px 25px}
 .preview-text pre{font-family:inherit;font-size:14px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+.signature-placement-window{height:min(950px,96vh);width:min(1000px,97vw)}
+.placement-hint{font-size:12px;color:#526d85;margin:0;padding:12px 19px;background:#eef6fd;line-height:1.6}
+.placement-scroll{min-height:0;flex:1;overflow:auto;background:#dce6f0;padding:20px;display:flex;align-items:flex-start;justify-content:center}
+.placement-page{position:relative;flex:none;box-shadow:0 4px 24px #16324b44;background:#fff;touch-action:none}
+.placement-canvas{display:block;width:100%;height:100%}
+.placement-stamp{position:absolute;z-index:2;border:2px dashed #1375cc;background:#bee1ff35;cursor:grab;touch-action:none;box-sizing:border-box;user-select:none}
+.placement-stamp:active{cursor:grabbing}
+.placement-stamp img{width:100%;height:100%;object-fit:contain;pointer-events:none;display:block}
+.placement-resize{position:absolute;width:18px;height:18px;bottom:-9px;right:-9px;background:#1375cc;border:2px solid white;border-radius:4px;cursor:nwse-resize;touch-action:none}
+.placement-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid #dce7f2}
+.placement-pages{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;color:#365a77}
+@media(max-width:620px){.placement-scroll{padding:8px}.placement-footer{flex-wrap:wrap}.placement-page{max-width:100%}.placement-pages{flex-wrap:wrap}}
