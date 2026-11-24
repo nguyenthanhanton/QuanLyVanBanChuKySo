@@ -275,6 +275,9 @@ public static class KySoEndpoints
             if(doc.TrangThai!="DA_CAP_SO" || doc.SoPhatHanh is null){
                 tx.Rollback();return Results.Conflict(new{message="Phải cấp số và duyệt trước khi chuẩn bị ký."});
             }
+            if(await LayBan(cn,tx,id,doc.PhienBanHienTai,0)!=null){
+                tx.Rollback();return Results.Conflict(new{message="PDF đã ký từ bước người soạn. Chờ bước 0.5.4 xử lý cấp số mà không làm hỏng chữ ký trước."});
+            }
             var source=await cn.QueryFirstOrDefaultAsync<NguonPdf>(@"
                 SELECT TOP 1 f.DuongDanLuuTru,f.MaBamSha256 FROM dbo.TepDinhKem f
                 JOIN dbo.PhienBanVanBan p ON p.MaPhienBan=f.MaPhienBan
@@ -312,9 +315,10 @@ public static class KySoEndpoints
             var(actor,error)=await permissions.YeuCau(http,"signing.sign");
             if(error!=null)return error;
             if(actor!.MaCoQuan is null)return Results.Forbid();
-            var stages=new Dictionary<string,(int Order,string Role)>{
-                ["KY_NHAY"]=(1,"TRUONG_PHONG"),["KY_LANH_DAO"]=(2,"LANH_DAO"),
-                ["KY_CO_QUAN"]=(3,"VAN_THU")};
+            var stages=new Dictionary<string,(int Order,string Role,string TaskStep)>{
+                ["KY_NHAY"]=(2,"TRUONG_PHONG","KIEM_TRA_NOI_DUNG"),
+                ["KY_THE_THUC"]=(3,"TRUONG_VAN_PHONG","KIEM_TRA_THE_THUC"),
+                ["KY_LANH_DAO"]=(4,"LANH_DAO","PHE_DUYET_LANH_DAO")};
             if(!stages.TryGetValue(request.LoaiChuKy??"",out var stage) || request.MaYeuCau==Guid.Empty)
                 return Results.BadRequest(new{message="Loại chữ ký hoặc MaYeuCau không hợp lệ."});
             using var cn=db.Open();await cn.OpenAsync();
@@ -330,9 +334,16 @@ public static class KySoEndpoints
             }
             var doc=await LayVanBan(cn,tx,id,actor.MaCoQuan.Value);
             if(doc==null){tx.Rollback();return Results.NotFound();}
-            if(doc.TrangThai!="CHO_KY"){
-                tx.Rollback();return Results.Conflict(new{message="Văn bản không ở bước ký."});
+            if(doc.TrangThai!="CHO_DUYET"){
+                tx.Rollback();return Results.Conflict(new{message="Văn bản phải ở bước chờ duyệt để ký theo cấp."});
             }
+            var assigned=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(1) FROM dbo.TacVuXuLy WITH(UPDLOCK,HOLDLOCK)
+                WHERE MaVanBan=@id AND MaCoQuan=@agency AND MaNguoiDuocGiao=@user
+                  AND Buoc=@taskStep AND PhienBanDuocDuyet=@version AND TrangThai='CHO_XU_LY'",
+                new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,
+                    taskStep=stage.TaskStep,version=doc.PhienBanHienTai},tx);
+            if(assigned!=1){tx.Rollback();return Results.Forbid();}
             var previous=await LayBan(cn,tx,id,doc.PhienBanHienTai,stage.Order-1);
             if(previous==null){tx.Rollback();return Results.Conflict(new{message="Chưa đủ chữ ký theo thứ tự bắt buộc."});}
             var already=await LayBan(cn,tx,id,doc.PhienBanHienTai,stage.Order);
@@ -341,7 +352,12 @@ public static class KySoEndpoints
                !string.Equals(await DichVuKyPdf.Bam(previous.DuongDanLuuTru),previous.MaBamSha256,StringComparison.OrdinalIgnoreCase)){
                 tx.Rollback();return Results.Conflict(new{message="Bản PDF trước ký không toàn vẹn."});
             }
-            int? owner=stage.Order==3?null:actor.MaNguoiDung;
+            var priorSignatures=signer.XacMinh(previous.DuongDanLuuTru);
+            if(priorSignatures.Count!=stage.Order-1 || priorSignatures.Any(s=>!s.ToanVenMatMa) ||
+               !priorSignatures[^1].BaoPhuToanBoBanHienTai){
+                tx.Rollback();return Results.Conflict(new{message="Chuỗi chữ ký các cấp trước không hợp lệ."});
+            }
+            int? owner=actor.MaNguoiDung;
             var cert=await cn.QuerySingleOrDefaultAsync<ChungThuLuu>(@"
                 SELECT TOP 1 MaChungThu,MaCoQuan,MaNguoiSoHuu,DuongDanKhoaMaHoa,MaKhoaMaHoa,
                     ChungThuCongKhai,NguonChungThu
@@ -356,10 +372,10 @@ public static class KySoEndpoints
             }
             var fileId=Guid.NewGuid();
             var path=TaoDuongDan(config,actor.MaCoQuan.Value,id,fileId);
-            var field=$"Ky_{stage.Order}_{id:N}";
+            var field=$"Ky_{stage.Order}_{id:N}_v{doc.PhienBanHienTai}";
             try {
                 var signed=signer.Ky(previous.DuongDanLuuTru,path,field,cert.MaChungThu,
-                    actor.MaCoQuan.Value,owner,cert.DuongDanKhoaMaHoa,request.LoaiChuKy);
+                    actor.MaCoQuan.Value,owner,cert.DuongDanKhoaMaHoa,request.LoaiChuKy!);
                 var verified=signer.XacMinh(path);
                 if(verified.Count!=stage.Order || verified.Any(s=>!s.ToanVenMatMa) ||
                    !verified[^1].BaoPhuToanBoBanHienTai)
@@ -381,13 +397,12 @@ public static class KySoEndpoints
                         type=request.LoaiChuKy,cms=signed.DuLieuCms,publicCert=cert.ChungThuCongKhai,hash,
                         priorHash=previous.MaBamSha256,fileId,certId=cert.MaChungThu,field,
                         trust=cert.NguonChungThu=="TU_KY_THU_NGHIEM"?"INTERNAL_SELF_SIGNED":"CHUA_THAM_DINH_CA"},tx);
-                var next=stage.Order==3?"DA_KY":"CHO_KY";
-                await cn.ExecuteAsync("UPDATE dbo.VanBan SET TrangThai=@next WHERE MaVanBan=@id",new{id,next},tx);
+                const string next="CHO_DUYET";
                 await cn.ExecuteAsync(@"
                     INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,HanhDong,MoTa,TrangThaiTruoc,TrangThaiSau,SoPhienBan)
-                    VALUES(@id,@agency,@user,@type,@message,'CHO_KY',@next,@version)",
+                    VALUES(@id,@agency,@user,@type,@message,'CHO_DUYET',@next,@version)",
                     new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,type=request.LoaiChuKy,
-                        message=$"{actor.HoTen} ký số PDF; bước {stage.Order}/3, SHA-256 {hash[..16]}…",
+                        message=$"{actor.HoTen} ký số PDF; bước {stage.Order}/5, SHA-256 {hash[..16]}…",
                         next,version=doc.PhienBanHienTai},tx);
                 var json=JsonSerializer.Serialize(new{maVanBan=id,loaiChuKy=request.LoaiChuKy,
                     trangThai=next,maBan=fileId,maBamSha256=hash,hopLeMatMa=true,
@@ -413,7 +428,9 @@ public static class KySoEndpoints
                   AND (v.MaNguoiTao=@user OR EXISTS(SELECT 1 FROM dbo.NguoiDungVaiTro uv
                       JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
                       WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency
-                        AND r.MaDinhDanh IN ('TRUONG_PHONG','LANH_DAO','VAN_THU')))
+                        AND r.MaDinhDanh IN ('TRUONG_PHONG','TRUONG_VAN_PHONG','LANH_DAO','VAN_THU'))
+                    OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t
+                        WHERE t.MaVanBan=v.MaVanBan AND t.MaNguoiDuocGiao=@user AND t.MaCoQuan=@agency))
                 ORDER BY p.ThuTuKy DESC",new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung});
             if(pdf==null || !File.Exists(pdf.DuongDanLuuTru))return Results.NotFound();
             var sha=await DichVuKyPdf.Bam(pdf.DuongDanLuuTru);
@@ -435,7 +452,9 @@ public static class KySoEndpoints
                   AND p.SoPhienBan=v.PhienBanHienTai
                 AND (v.MaNguoiTao=@user OR EXISTS(SELECT 1 FROM dbo.NguoiDungVaiTro uv
                    JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro WHERE uv.MaNguoiDung=@user
-                   AND uv.MaCoQuan=@agency AND r.MaDinhDanh IN ('TRUONG_PHONG','LANH_DAO','VAN_THU')))
+                   AND uv.MaCoQuan=@agency AND r.MaDinhDanh IN ('TRUONG_PHONG','TRUONG_VAN_PHONG','LANH_DAO','VAN_THU'))
+                   OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t WHERE t.MaVanBan=v.MaVanBan
+                       AND t.MaNguoiDuocGiao=@user AND t.MaCoQuan=@agency))
                 ORDER BY p.ThuTuKy DESC",new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung});
             if(pdf==null || !File.Exists(pdf.DuongDanLuuTru))return Results.NotFound();
             if(await DichVuKyPdf.Bam(pdf.DuongDanLuuTru)!=pdf.MaBamSha256)

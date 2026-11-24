@@ -114,14 +114,15 @@ public static class QuyTrinhEndpoints
         }).RequireAuthorization();
 
         app.MapPost("/api/v1/workflow/tasks/{taskId:guid}/decisions",async(Guid taskId,DuyetTacVu body,
-            HttpContext http,PhanQuyen permission,Database db)=>{
+            HttpContext http,PhanQuyen permission,Database db,DichVuKyPdf signer)=>{
             var(actor,error)=await permission.YeuCau(http,"workflow.decide");
             if(error!=null)return error;
             if(actor!.MaCoQuan is null)return Results.Forbid();
             if(body.KetQua is not ("DUYET" or "TRA_SUA"))return Results.BadRequest(new{message="KetQua phải là DUYET hoặc TRA_SUA."});
             if(body.KetQua=="TRA_SUA" && string.IsNullOrWhiteSpace(body.LyDo))
                 return Results.BadRequest(new{message="Phải nhập lý do trả sửa."});
-            using var cn=db.Open();await cn.OpenAsync();using var tx=cn.BeginTransaction();
+            using var cn=db.Open();await cn.OpenAsync();
+            using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
             var task=await cn.QuerySingleOrDefaultAsync<TacVuDuocGiao>(@"
                 SELECT MaVanBan,Buoc,PhienBanDuocDuyet,TrangThai
                 FROM dbo.TacVuXuLy WITH(UPDLOCK)
@@ -134,6 +135,35 @@ public static class QuyTrinhEndpoints
             var currentVer=await cn.ExecuteScalarAsync<int>("SELECT PhienBanHienTai FROM dbo.VanBan WHERE MaVanBan=@id",
                 new{id=task.MaVanBan},tx);
             if(currentVer!=task.PhienBanDuocDuyet){tx.Rollback();return Results.Conflict(new{message="Phiên bản văn bản đã thay đổi."});}
+            if(body.KetQua=="DUYET"){
+                var expected=task.Buoc switch{
+                    "KIEM_TRA_NOI_DUNG"=>(Order:2,Type:"KY_NHAY"),
+                    "KIEM_TRA_THE_THUC"=>(Order:3,Type:"KY_THE_THUC"),
+                    "PHE_DUYET_LANH_DAO"=>(Order:4,Type:"KY_LANH_DAO"),
+                    _=>(Order:0,Type:"")
+                };
+                if(expected.Order==0){tx.Rollback();return Results.Conflict(new{message="Bước phê duyệt không hợp lệ."});}
+                var signed=await cn.QuerySingleOrDefaultAsync<BanPdf>(@"
+                    SELECT p.MaBan,p.DuongDanLuuTru,p.MaBamSha256
+                    FROM dbo.BanPdfDaKy p JOIN dbo.ChuKySo s ON s.MaBanDaKy=p.MaBan
+                    WHERE p.MaVanBan=@id AND p.SoPhienBan=@version AND p.ThuTuKy=@stage
+                        AND s.LoaiChuKy=@type AND s.MaNguoiKy=@user AND s.MaCoQuan=@agency",
+                    new{id=task.MaVanBan,version=currentVer,stage=expected.Order,
+                        type=expected.Type,user=actor.MaNguoiDung,agency=actor.MaCoQuan},tx);
+                if(signed==null || !File.Exists(signed.DuongDanLuuTru) ||
+                   !string.Equals(await DichVuKyPdf.Bam(signed.DuongDanLuuTru),signed.MaBamSha256,StringComparison.OrdinalIgnoreCase)){
+                    tx.Rollback();return Results.Conflict(new{message="Phải ký số PDF đúng cấp và đúng phiên bản trước khi duyệt."});
+                }
+                try {
+                    var checks=signer.XacMinh(signed.DuongDanLuuTru);
+                    if(checks.Count!=expected.Order || checks.Any(s=>!s.ToanVenMatMa) ||
+                       !checks[^1].BaoPhuToanBoBanHienTai){
+                        tx.Rollback();return Results.Conflict(new{message="Chuỗi chữ ký PDF chưa hợp lệ."});
+                    }
+                }catch(Exception ex)when(ex is System.Security.Cryptography.CryptographicException or InvalidDataException){
+                    tx.Rollback();return Results.Conflict(new{message="Không xác minh được chữ ký PDF."});
+                }
+            }
             await cn.ExecuteAsync(@"
                 UPDATE dbo.TacVuXuLy SET TrangThai=@status,ThoiDiemHoanThanh=SYSUTCDATETIME()
                 WHERE MaTacVu=@taskId",new{taskId,status=body.KetQua},tx);
@@ -152,13 +182,7 @@ public static class QuyTrinhEndpoints
                     "KIEM_TRA_THE_THUC"=>"PHE_DUYET_LANH_DAO",
                     _=>null
                 };
-                if(nextStep=="KIEM_TRA_THE_THUC"){
-                    var useOffice=await cn.ExecuteScalarAsync<bool?>(@"
-                        SELECT c.CoKiemTraVanPhong FROM dbo.VanBan v
-                        LEFT JOIN dbo.CauHinhQuyTrinh c ON c.MaCauHinh=v.MaCauHinh
-                        WHERE v.MaVanBan=@id",new{id=task.MaVanBan},tx);
-                    if(useOffice==false)nextStep="PHE_DUYET_LANH_DAO";
-                }
+                // v0.5: all three reviewing positions must sign; never skip the office check.
                 if(nextStep!=null){
                     var role=nextStep=="KIEM_TRA_THE_THUC"?"TRUONG_VAN_PHONG":"LANH_DAO";
                     var nextUser=await TimNguoiTheoVaiTro(cn,tx,actor.MaCoQuan.Value,role);

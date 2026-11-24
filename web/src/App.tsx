@@ -219,7 +219,7 @@ function TransferCards({doc}:{doc:VanBan}) {
   </div>)}</div>;
 }
 
-function SignaturePanel({doc,actor,token,onUpdated}:{doc:VanBan;actor:Actor|null;token:string;onUpdated:()=>Promise<void>}) {
+function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:Actor|null;token:string;onUpdated:()=>Promise<void>;taskStep?:string}) {
   const [accountPassword,setAccountPassword]=useState('');
   const [pfxPassword,setPfxPassword]=useState('');
   const [certName,setCertName]=useState('');
@@ -298,12 +298,16 @@ function SignaturePanel({doc,actor,token,onUpdated}:{doc:VanBan;actor:Actor|null
         <button className="primary small" disabled={busy||signatures.length>0}
           onClick={()=>operation('draft-sign')}>{signatures.length>0?'Đã ký PDF người soạn':'Ký số PDF người soạn (1/5)'}</button>
       </>}
-      {doc.status==='DA_CAP_SO'&&isAllowed(actor,'signing.prepare')&&<button className="primary small" disabled={busy}
-        onClick={()=>operation('prepare')}>Chuẩn bị PDF và chèn số văn bản</button>}
-      {doc.status==='CHO_KY'&&isAllowed(actor,'signing.sign')&&<div className="signature-step-actions">
-        <button className="secondary small" disabled={busy||signatures.length!==0} onClick={()=>operation('sign','KY_NHAY')}>1. Ký nháy</button>
-        <button className="secondary small" disabled={busy||signatures.length!==1} onClick={()=>operation('sign','KY_LANH_DAO')}>2. Lãnh đạo ký</button>
-        <button className="secondary small" disabled={busy||signatures.length!==2} onClick={()=>operation('sign','KY_CO_QUAN')}>3. Cơ quan ký</button></div>}
+      {doc.status==='CHO_DUYET'&&isAllowed(actor,'signing.sign')&&taskStep&&<div className="signature-step-actions">
+        {taskStep==='KIEM_TRA_NOI_DUNG'&&<button className="primary small" disabled={busy||signatures.length!==1}
+          onClick={()=>operation('sign','KY_NHAY')}>2/5. Trưởng phòng ký nháy</button>}
+        {taskStep==='KIEM_TRA_THE_THUC'&&<button className="primary small" disabled={busy||signatures.length!==2}
+          onClick={()=>operation('sign','KY_THE_THUC')}>3/5. Trưởng văn phòng ký thể thức</button>}
+        {taskStep==='PHE_DUYET_LANH_DAO'&&<button className="primary small" disabled={busy||signatures.length!==3}
+          onClick={()=>operation('sign','KY_LANH_DAO')}>4/5. Lãnh đạo ký phê duyệt</button>}
+        <p className="fine-note">Chỉ người đang được giao xử lý mới được ký. Ký xong quay lại Hành trình để duyệt chuyển bước.</p>
+      </div>}
+      {doc.status==='DA_CAP_SO'&&<p className="fine-note">Bước 5/5 ký chứng thư cơ quan và phát hành sẽ được triển khai ở phiên bản 0.5.4.</p>}
       {doc.status==='DA_KY'&&isAllowed(actor,'publications.issue')&&<button className="primary small" disabled={busy}
         onClick={()=>operation('publish')}>Phát hành đến các cơ quan dự kiến</button>}
       <div className="signature-step-actions"><button className="secondary small" disabled={busy} onClick={()=>operation('verify')}>Xác minh chữ ký</button>
@@ -451,11 +455,12 @@ function DraftAttachmentEditor({doc,actor,token,onUpdated}:{doc:VanBan;actor:Act
   </div>;
 }
 
-function DocumentDetails({doc,onClose,onAction,allowed,canDecide,liveTimeline,token,onUpdated}:
+function DocumentDetails({doc,onClose,onAction,allowed,canDecide,taskStep,liveTimeline,token,onUpdated}:
   {doc:VanBan,onClose:()=>void,onAction:(action:'submit'|'approve'|'revise'|'register')=>void,allowed:Actor|null,canDecide:boolean,
-    liveTimeline?:{ events:SuKien[];transfers:ChuyenPhat[] };token:string;onUpdated:()=>Promise<void>}) {
+    taskStep?:string;liveTimeline?:{ events:SuKien[];transfers:ChuyenPhat[] };token:string;onUpdated:()=>Promise<void>}) {
   const [tab,setTab]=useState<'journey'|'info'|'versions'|'signatures'>('journey');
   const [draftSigned,setDraftSigned]=useState(false);
+  const [reviewSigned,setReviewSigned]=useState(false);
   const [checkingDraftSignature,setCheckingDraftSignature]=useState(false);
   const loadDraftSignature=async()=>{
     if(DEMO || !token || (doc.status!=='NHAP'&&doc.status!=='TRA_SUA'))return;
@@ -468,8 +473,20 @@ function DocumentDetails({doc,onClose,onAction,allowed,canDecide,liveTimeline,to
         String(field(signatures[0],'TenTruongKy')).startsWith('Ky_1_'));
     }catch{setDraftSigned(false);}finally{setCheckingDraftSignature(false);}
   };
+  const reviewOrder=taskStep==='KIEM_TRA_NOI_DUNG'?2:taskStep==='KIEM_TRA_THE_THUC'?3:
+    taskStep==='PHE_DUYET_LANH_DAO'?4:0;
+  const loadReviewSignature=async()=>{
+    if(DEMO||!token||doc.status!=='CHO_DUYET'||!reviewOrder)return;
+    try{
+      const result=await requestApi(`/documents/${doc.id}/signatures/verification`,token) as Record<string,unknown>;
+      const signatures=(field(result,'ChuKy') as Record<string,unknown>[]|undefined)??[];
+      setReviewSigned(signatures.length===reviewOrder&&signatures.every(s=>Boolean(field(s,'ToanVenMatMa')))&&
+        Boolean(field(signatures[reviewOrder-1],'BaoPhuToanBoBanHienTai')));
+    }catch{setReviewSigned(false);}
+  };
   useEffect(()=>{setDraftSigned(false);void loadDraftSignature();},[doc.id,doc.version,doc.status,token]);
-  const refreshAfterSignature=async()=>{await onUpdated();await loadDraftSignature();};
+  useEffect(()=>{setReviewSigned(false);void loadReviewSignature();},[doc.id,doc.version,doc.status,taskStep,token]);
+  const refreshAfterSignature=async()=>{await onUpdated();await loadDraftSignature();await loadReviewSignature();};
   const viewDoc=liveTimeline?{...doc,events:liveTimeline.events,transfers:liveTimeline.transfers}:doc;
   return <div className="drawer-backdrop" onClick={onClose}>
     <div className="drawer" role="dialog" aria-modal="true" aria-label="Chi tiết văn bản" onClick={e=>e.stopPropagation()}>
@@ -484,7 +501,11 @@ function DocumentDetails({doc,onClose,onAction,allowed,canDecide,liveTimeline,to
             Trình duyệt<ArrowRight size={15}/></button>
           {!DEMO&&!draftSigned&&<span className="fine-note">Cần ký PDF người soạn tại tab Chữ ký số trước.</span>}
         </>}
-        {doc.status==='CHO_DUYET' && canDecide && isAllowed(allowed,'workflow.decide') && <><button className="primary small" onClick={()=>onAction('approve')}>Phê duyệt<Check size={15}/></button><button className="secondary small" onClick={()=>onAction('revise')}>Trả sửa</button></>}
+        {doc.status==='CHO_DUYET' && canDecide && isAllowed(allowed,'workflow.decide') && <>
+          <button className="primary small" disabled={!DEMO&&!reviewSigned} onClick={()=>onAction('approve')}>Phê duyệt<Check size={15}/></button>
+          <button className="secondary small" onClick={()=>onAction('revise')}>Trả sửa</button>
+          {!DEMO&&!reviewSigned&&<span className="fine-note">Cần ký số PDF ở tab Chữ ký số trước khi duyệt.</span>}
+        </>}
         {doc.status==='CHO_CAP_SO' && isAllowed(allowed,'registers.manage') && <button className="primary small" onClick={()=>onAction('register')}>Cấp số văn bản <ArrowRight size={15}/></button>}
       </div>
       <div className="drawer-tabs">
@@ -511,7 +532,7 @@ function DocumentDetails({doc,onClose,onAction,allowed,canDecide,liveTimeline,to
           <span className="version-chip">v{v}</span></div>)}
         {DEMO&&<p className="fine-note">Dữ liệu mô phỏng. Bản thật lưu các tệp PDF, Word, Excel theo từng phiên bản ở máy chủ.</p>}
       </section>}
-      {tab==='signatures' && !DEMO && <SignaturePanel doc={doc} actor={allowed} token={token} onUpdated={refreshAfterSignature}/>}
+      {tab==='signatures' && !DEMO && <SignaturePanel doc={doc} actor={allowed} token={token} taskStep={taskStep} onUpdated={refreshAfterSignature}/>}
       {tab==='signatures' && DEMO && <section className="drawer-section">
         <div className="signature-header"><div className="signature-icon"><ShieldCheck size={30}/></div>
           <h3>Kiểm tra chữ ký số</h3><p>Phân biệt chữ ký mật mã học và ảnh hiển thị chữ ký.</p></div>
@@ -894,6 +915,7 @@ export default function App() {
     </main>
     {currentDoc&&<DocumentDetails key={currentDoc.id} doc={currentDoc} onClose={()=>setSelected(null)} onAction={action} allowed={actor}
       canDecide={DEMO?currentDoc.assignee===actor.name:workqueue.some(t=>String(field(t,'MaVanBan'))===currentDoc.id)}
+      taskStep={String(field(workqueue.find(t=>String(field(t,'MaVanBan'))===currentDoc.id)??{},'Buoc')??'')}
       liveTimeline={remoteTimeline} token={token} onUpdated={updateAfterOperation}/>}
     {createOpen&&<NewDocument onClose={()=>setCreateOpen(false)} onCreate={create} live={!DEMO} recipients={agencyOptions}/>}
     {notice&&<div className="toast"><CheckCircle2 size={18}/>{notice}<button aria-label="Đóng thông báo" onClick={()=>setNotice('')}><X size={15}/></button></div>}
