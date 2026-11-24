@@ -2,6 +2,8 @@
 
 > **Nhánh phát triển 0.5.1:** Đã có [thiết kế năm vị trí ký số](docs/THIET_KE_KY_SO_05_CAP.md), [migration 007](database/007_nen_tang_ky_nam_cap.sql) và [hướng dẫn kiểm thử](docs/KIEM_THU_KY_05_CAP.md). Đây mới là nền tảng CSDL/quyền, **chưa có quy trình ký năm cấp trên backend/frontend**. Sau khi sao lưu SQL Server và áp dụng 006, chạy 007 trong SSMS rồi kiểm tra theo tài liệu. Không chạy 007 trước 006; không dùng dữ liệu thật để thử nghiệm.
 
+> **Chặng 0.5.2 (đang kiểm thử):** API `/api/v1/documents/{id}/draft-signature` ký trực tiếp PDF chính của tác giả khi ở trạng thái nháp, lưu bản 0/1 bất biến; `submit` kiểm tra chữ ký mật mã của phiên bản hiện tại trước khi chuyển trưởng phòng. `Signing:RequireDrafterSignature` mặc định là `true` trong nhánh này, có thể đặt `false` để quay lại thao tác submit kiểu 0.4 trong môi trường phát triển. Giao diện có nút **Ký số PDF người soạn (1/5)**. **Chưa nâng cấp ký cấp 2–5**, vì vậy chưa thử phát hành văn bản theo quy trình mới; xem [kịch bản kiểm thử 0.5.2](docs/KIEM_THU_KY_05_CAP.md).
+
 Ứng dụng web quản lý văn bản đi/đến nhiều cơ quan, được dựng mới theo bộ tài liệu yêu cầu 01–08 cung cấp ngày 24/11/2026. Trọng tâm của bản đầu là **theo dõi hành trình văn bản và kiểm soát phạm vi dữ liệu**.
 
 > **Quan trọng:** Đây là **mã nguồn bản nền tảng chưa nghiệm thu toàn bộ UC001–UC032**. Đã bổ sung mã backend để ký mật mã CMS trong PDF tuần tự và phát hành/gửi/nhận liên cơ quan, nhưng **chưa có điều kiện chạy thử .NET/SQL Server và kiểm thử chữ ký PDF tích hợp**. Giao diện mặc định vẫn là demo. Không sử dụng cho dữ liệu sản xuất hoặc khẳng định hiệu lực pháp lý khi chưa kiểm thử, thẩm định và tích hợp CA.

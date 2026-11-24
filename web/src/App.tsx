@@ -235,7 +235,7 @@ function SignaturePanel({doc,actor,token,onUpdated}:{doc:VanBan;actor:Actor|null
     requestApi('/signing-credentials',token).then((x:Record<string,unknown>[])=>setCredentials(x)).catch(()=>{});
     requestApi(`/documents/${doc.id}/signatures/verification`,token).then((x:Record<string,unknown>)=>setVerify(x)).catch(()=>{});
   },[doc.id,token]);
-  const operation=async(kind:'prepare'|'sign'|'publish'|'verify'|'download',signature?:string)=>{
+  const operation=async(kind:'prepare'|'sign'|'draft-sign'|'publish'|'verify'|'download',signature?:string)=>{
     setBusy(true);setMessage('');
     try {
       if(kind==='download'){
@@ -243,10 +243,11 @@ function SignaturePanel({doc,actor,token,onUpdated}:{doc:VanBan;actor:Actor|null
       } else if(kind==='verify'){
         setVerify(await requestApi(`/documents/${doc.id}/signatures/verification`,token));
       } else {
-        if(kind==='sign'&&!accountPassword)throw new Error('Cần nhập mật khẩu để xác nhận ký.');
+        if((kind==='sign'||kind==='draft-sign')&&!accountPassword)throw new Error('Cần nhập mật khẩu để xác nhận ký.');
         const endpoint=kind==='prepare'?`/documents/${doc.id}/prepared-pdf`:
-          kind==='sign'?`/documents/${doc.id}/signatures`:`/documents/${doc.id}/publications`;
-        const payload=kind==='sign'?{loaiChuKy:signature,matKhau:accountPassword,maYeuCau:crypto.randomUUID()}:
+          kind==='sign'?`/documents/${doc.id}/signatures`:
+          kind==='draft-sign'?`/documents/${doc.id}/draft-signature`:`/documents/${doc.id}/publications`;
+        const payload=kind==='sign'||kind==='draft-sign'?{loaiChuKy:kind==='draft-sign'?'KY_NGUOI_SOAN':signature,matKhau:accountPassword,maYeuCau:crypto.randomUUID()}:
           {maYeuCau:crypto.randomUUID()};
         await requestApi(endpoint,token,{method:'POST',body:JSON.stringify(payload)});
         setAccountPassword('');
@@ -292,6 +293,11 @@ function SignaturePanel({doc,actor,token,onUpdated}:{doc:VanBan;actor:Actor|null
         !isAllowed(actor,certType==='CA_NHAN'?'signatures.manage-own':'signatures.manage-agency')}
         onClick={createCredential}>Lưu chứng thư</button></div>
     <div className="form-section"><h4>Các bước ký và phát hành</h4>
+      {(doc.status==='NHAP'||doc.status==='TRA_SUA')&&isAllowed(actor,'signing.sign')&&<>
+        <p className="fine-note">Bước 1/5: Người tạo văn bản ký trực tiếp PDF chính của phiên bản hiện tại trước khi trình duyệt. Nếu chỉnh sửa tệp, phải ký lại phiên bản mới.</p>
+        <button className="primary small" disabled={busy||signatures.length>0}
+          onClick={()=>operation('draft-sign')}>{signatures.length>0?'Đã ký PDF người soạn':'Ký số PDF người soạn (1/5)'}</button>
+      </>}
       {doc.status==='DA_CAP_SO'&&isAllowed(actor,'signing.prepare')&&<button className="primary small" disabled={busy}
         onClick={()=>operation('prepare')}>Chuẩn bị PDF và chèn số văn bản</button>}
       {doc.status==='CHO_KY'&&isAllowed(actor,'signing.sign')&&<div className="signature-step-actions">
@@ -449,6 +455,21 @@ function DocumentDetails({doc,onClose,onAction,allowed,canDecide,liveTimeline,to
   {doc:VanBan,onClose:()=>void,onAction:(action:'submit'|'approve'|'revise'|'register')=>void,allowed:Actor|null,canDecide:boolean,
     liveTimeline?:{ events:SuKien[];transfers:ChuyenPhat[] };token:string;onUpdated:()=>Promise<void>}) {
   const [tab,setTab]=useState<'journey'|'info'|'versions'|'signatures'>('journey');
+  const [draftSigned,setDraftSigned]=useState(false);
+  const [checkingDraftSignature,setCheckingDraftSignature]=useState(false);
+  const loadDraftSignature=async()=>{
+    if(DEMO || !token || (doc.status!=='NHAP'&&doc.status!=='TRA_SUA'))return;
+    setCheckingDraftSignature(true);
+    try {
+      const result=await requestApi(`/documents/${doc.id}/signatures/verification`,token) as Record<string,unknown>;
+      const signatures=(field(result,'ChuKy') as Record<string,unknown>[]|undefined)??[];
+      setDraftSigned(signatures.length===1&&Boolean(field(signatures[0],'ToanVenMatMa'))&&
+        Boolean(field(signatures[0],'BaoPhuToanBoBanHienTai'))&&
+        String(field(signatures[0],'TenTruongKy')).startsWith('Ky_1_'));
+    }catch{setDraftSigned(false);}finally{setCheckingDraftSignature(false);}
+  };
+  useEffect(()=>{setDraftSigned(false);void loadDraftSignature();},[doc.id,doc.version,doc.status,token]);
+  const refreshAfterSignature=async()=>{await onUpdated();await loadDraftSignature();};
   const viewDoc=liveTimeline?{...doc,events:liveTimeline.events,transfers:liveTimeline.transfers}:doc;
   return <div className="drawer-backdrop" onClick={onClose}>
     <div className="drawer" role="dialog" aria-modal="true" aria-label="Chi tiết văn bản" onClick={e=>e.stopPropagation()}>
@@ -458,7 +479,11 @@ function DocumentDetails({doc,onClose,onAction,allowed,canDecide,liveTimeline,to
         {doc.urgency!=='THUONG'&&<span className="priority-pill">{doc.urgency==='HOA_TOC'?'Hỏa tốc':'Khẩn'}</span>}
         <span className="neutral-pill">Phiên bản {doc.version}</span></div>
       <div className="drawer-actions">
-        {doc.status==='NHAP' && isAllowed(allowed,'documents.submit') && <button className="primary small" onClick={()=>onAction('submit')}>Trình duyệt<ArrowRight size={15}/></button>}
+        {(doc.status==='NHAP'||doc.status==='TRA_SUA') && isAllowed(allowed,'documents.submit') && <>
+          <button className="primary small" disabled={!DEMO&&(!draftSigned||checkingDraftSignature)} onClick={()=>onAction('submit')}>
+            Trình duyệt<ArrowRight size={15}/></button>
+          {!DEMO&&!draftSigned&&<span className="fine-note">Cần ký PDF người soạn tại tab Chữ ký số trước.</span>}
+        </>}
         {doc.status==='CHO_DUYET' && canDecide && isAllowed(allowed,'workflow.decide') && <><button className="primary small" onClick={()=>onAction('approve')}>Phê duyệt<Check size={15}/></button><button className="secondary small" onClick={()=>onAction('revise')}>Trả sửa</button></>}
         {doc.status==='CHO_CAP_SO' && isAllowed(allowed,'registers.manage') && <button className="primary small" onClick={()=>onAction('register')}>Cấp số văn bản <ArrowRight size={15}/></button>}
       </div>
@@ -486,7 +511,7 @@ function DocumentDetails({doc,onClose,onAction,allowed,canDecide,liveTimeline,to
           <span className="version-chip">v{v}</span></div>)}
         {DEMO&&<p className="fine-note">Dữ liệu mô phỏng. Bản thật lưu các tệp PDF, Word, Excel theo từng phiên bản ở máy chủ.</p>}
       </section>}
-      {tab==='signatures' && !DEMO && <SignaturePanel doc={doc} actor={allowed} token={token} onUpdated={onUpdated}/>}
+      {tab==='signatures' && !DEMO && <SignaturePanel doc={doc} actor={allowed} token={token} onUpdated={refreshAfterSignature}/>}
       {tab==='signatures' && DEMO && <section className="drawer-section">
         <div className="signature-header"><div className="signature-icon"><ShieldCheck size={30}/></div>
           <h3>Kiểm tra chữ ký số</h3><p>Phân biệt chữ ký mật mã học và ảnh hiển thị chữ ký.</p></div>
