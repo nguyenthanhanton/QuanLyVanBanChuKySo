@@ -76,8 +76,6 @@ Các chặng sau bắt buộc thử bằng .NET 8/SQL Server và trình đọc P
 
 **Quy tắc:** dùng **văn bản thử nghiệm mới** để có đủ năm chữ ký kèm hình ảnh. Không được sửa các PDF đã ký của văn bản cũ để thêm ảnh. Mỗi người chuẩn bị PNG nền trong suốt riêng (văn thư chuẩn bị PNG con dấu thử nghiệm). Chỉ kiểm tra mẫu giả lập, không dùng ảnh chữ ký/con dấu thật trong môi trường demo.
 
-**Lưu ý PDF nguồn:** Một số PDF có bảng xref bị lỗi nhưng trình duyệt vẫn đọc được. iText từ chối ký append nếu phải phục hồi cấu trúc. Trước chữ ký đầu tiên, backend tạo **bản nền ký chuẩn hóa riêng** từ PDF chưa ký; bản tải lên và các phiên bản lịch sử không bị ghi đè. Cần kiểm tra trực quan bản đã ký so với bản gốc (số trang, vị trí, font, bảng biểu); nếu PDF không thể chuẩn hóa thì xuất lại từ Word/Excel. Tuyệt đối không chuẩn hóa lại bản đã có chữ ký cấp 1–5.
-
 1. Ở tab **Chữ ký số**, trước khi ký chọn ảnh `.png` tối đa 5 MB, kích thước mỗi chiều tối đa 4096 px. Nhấn **Mở PDF để đặt chữ ký**, chọn trang, kéo ảnh và kéo góc để điều chỉnh kích thước; nhấn **Xác nhận vị trí**. Tọa độ tương đối từ mép trái/trên; không cho vùng vượt trang. Đối với các trang PDF có rotation khác 0, API từ chối vì chưa hỗ trợ chính xác tọa độ. Không xác nhận vị trí thì giao diện sẽ chặn ký.
 2. Ký lần 1 người soạn. Tải PDF và kiểm tra vùng hình ký hiển thị, chữ ký CMS có `ToanVenMatMa=true`. Sau đó trình duyệt.
 3. Lần lượt dùng trưởng phòng, trưởng văn phòng, lãnh đạo: mỗi người chọn PNG riêng và vị trí khác không che nội dung, ký lần 2/3/4, xác minh số chữ ký tăng đúng thứ tự; thử duyệt khi chưa ký vẫn trả 409.
