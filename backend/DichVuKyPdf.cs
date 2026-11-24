@@ -132,7 +132,10 @@ public sealed class DichVuKyPdf(IConfiguration config)
             IPrivateKey privateKey=new PrivateKeyBC(store.GetKey(alias).Key);
             IX509Certificate[] chain=store.GetCertificateChain(alias)
                 .Select(item=>(IX509Certificate)new X509CertificateBC(item.Certificate)).ToArray();
-            var signer=new PdfSigner(new PdfReader(source),new FileStream(destination,FileMode.CreateNew),
+            // Dispose the output even when iText fails before SignDetached closes the PDF.
+            // Otherwise Windows holds a lock and error cleanup hides the original exception.
+            using var output=new FileStream(destination,FileMode.CreateNew,FileAccess.Write,FileShare.None);
+            var signer=new PdfSigner(new PdfReader(source),output,
                 new StampingProperties().UseAppendMode());
             signer.GetSignerProperties().SetFieldName(field);
             if(viTri!=null){

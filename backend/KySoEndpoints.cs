@@ -40,6 +40,13 @@ public sealed class NguonPdf {
 
 public static class KySoEndpoints
 {
+    // Cleanup must never replace the actual PDF signing error with an IOException.
+    private static void XoaTepTam(string path)
+    {
+        try { if(File.Exists(path)) File.Delete(path); }
+        catch(IOException) { /* PDF writer may still be releasing its handle. */ }
+        catch(UnauthorizedAccessException) { /* Preserve the original exception. */ }
+    }
     internal static DichVuKyPdf.ViTriHienThi? ViTriKy(KyVanBan request,string label,bool agency=false)
     {
         if(string.IsNullOrWhiteSpace(request.HinhAnhKyBase64) && !agency)return null;
@@ -277,11 +284,11 @@ public static class KySoEndpoints
                 await GhiBienNhan(cn,tx,actor,request.MaYeuCau,"KY_NGUOI_SOAN",json);
                 tx.Commit();return Results.Content(json,"application/json");
             }catch(Exception ex)when(ex is CryptographicException or InvalidDataException){
-                tx.Rollback();if(File.Exists(signedPath))File.Delete(signedPath);
-                if(File.Exists(baselinePath))File.Delete(baselinePath);
+                tx.Rollback();XoaTepTam(signedPath);
+                XoaTepTam(baselinePath);
                 return Results.BadRequest(new{message="Không ký được PDF: "+ex.Message});
-            }catch{tx.Rollback();if(File.Exists(signedPath))File.Delete(signedPath);
-                if(File.Exists(baselinePath))File.Delete(baselinePath);throw;}
+            }catch{tx.Rollback();XoaTepTam(signedPath);
+                XoaTepTam(baselinePath);throw;}
         }).RequireAuthorization();
 
         app.MapPost("/api/v1/documents/{id:guid}/prepared-pdf",async(Guid id,ChuanBiPdf request,
@@ -435,9 +442,9 @@ public static class KySoEndpoints
                 await GhiBienNhan(cn,tx,actor,request.MaYeuCau,command,json);
                 tx.Commit();return Results.Content(json,"application/json");
             }catch(Exception ex)when(ex is CryptographicException or InvalidDataException){
-                tx.Rollback();if(File.Exists(path))File.Delete(path);
+                tx.Rollback();XoaTepTam(path);
                 return Results.BadRequest(new{message="Không ký được PDF: "+ex.Message});
-            }catch{tx.Rollback();if(File.Exists(path))File.Delete(path);throw;}
+            }catch{tx.Rollback();XoaTepTam(path);throw;}
         }).RequireAuthorization();
 
         // v0.5.4: the fifth (agency) signature appends directly to the stage-4 PDF.
@@ -524,9 +531,9 @@ public static class KySoEndpoints
                 await GhiBienNhan(cn,tx,actor,request.MaYeuCau,"KY_5",json);
                 tx.Commit();return Results.Content(json,"application/json");
             }catch(Exception ex)when(ex is CryptographicException or InvalidDataException){
-                tx.Rollback();if(File.Exists(path))File.Delete(path);
+                tx.Rollback();XoaTepTam(path);
                 return Results.BadRequest(new{message="Không ký được PDF cơ quan: "+ex.Message});
-            }catch{tx.Rollback();if(File.Exists(path))File.Delete(path);throw;}
+            }catch{tx.Rollback();XoaTepTam(path);throw;}
         }).RequireAuthorization();
 
         app.MapGet("/api/v1/documents/{id:guid}/signatures/verification",async(Guid id,
