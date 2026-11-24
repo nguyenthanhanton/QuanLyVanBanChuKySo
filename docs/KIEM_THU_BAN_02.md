@@ -4,7 +4,7 @@ Tài liệu hướng dẫn **cần thực thi** trên Windows/.NET 8/SQL Server.
 
 ## A. Thiết lập an toàn
 
-1. Tạo **SQL Server database thử nghiệm mới** bằng `001`, chạy `002`, `004`, `005`, sau cùng chạy truy vấn `003` (trong `README.md`). Nếu đã có database cũ, **chỉ chạy 005**. Không chạy seed `002` trên hệ thống có tài khoản thật.
+1. Tạo **SQL Server database thử nghiệm mới** bằng `001`, chạy `002`, `004`, `005`, `006`, sau cùng chạy truy vấn `003` (trong `README.md`). Nếu đang ở bản 0.3 đã chạy `005`, **chỉ chạy 006**. Không chạy seed `002` trên hệ thống có tài khoản thật.
 2. Cấu hình `Storage__RootPath`, `Signing__KeyStorePath`, `Signing__FontPath`, `Security__EncryptionKeyBase64`, `Security__PfxPassword`, `Security__ActiveKeyId`, JWT qua biến môi trường. Khóa mã hóa cần sao lưu độc lập.
 3. Khởi động API bằng `dotnet run`; kiểm tra `GET /api/v1/health` và mã HTTP 200.
 4. Khởi động React với `VITE_DEMO_MODE=false`, đăng nhập từng tài khoản ở các cửa sổ riêng.
@@ -13,7 +13,7 @@ Tài liệu hướng dẫn **cần thực thi** trên Windows/.NET 8/SQL Server.
 
 | # | Người dùng | Thao tác | Kết quả phải thấy |
 |---|---|---|---|
-| 1 | `chuyenvien_a` | Tạo văn bản kèm PDF, Word, Excel; chọn Cơ quan B | `VanBan.TrangThai=NHAP`, có ba tệp và một nơi nhận dự kiến |
+| 1 | `chuyenvien_a` | Chọn PDF ở **Văn bản chính**, Word/Excel ở **Tệp đính kèm**, chọn cơ quan B | `VanBan.TrangThai=NHAP`, có ba tệp, đúng một PDF chính, một nơi nhận |
 | 1a | Người tạo | Mở tab **Phiên bản**, bỏ Excel cũ, thêm Excel mới, sửa trích yếu | Có phiên bản 2, tệp cũ ở phiên bản 1, tiêu đề giữ nguyên |
 | 2 | `chuyenvien_a` | Trình duyệt | `CHO_DUYET`, tạo công việc cho trưởng phòng |
 | 3 | `truongphong_a` | Duyệt nội dung | Chuyển công việc kiểm tra thể thức |
@@ -41,6 +41,9 @@ Tài liệu hướng dẫn **cần thực thi** trên Windows/.NET 8/SQL Server.
 - Chỉnh một byte trong file PDF đã ký: kiểm tra hash trước tải/gửi phải từ chối; chức năng xác minh PDF độc lập phải báo chữ ký không còn hợp lệ. Không sửa tài liệu sản xuất để thử.
 - Cố sửa văn bản sau khi cấp số/ký/phát hành: 409; không được thay thế bản phát hành.
 - Cố đổi `VanBan.TieuDe` bằng API hoặc SQL `UPDATE`: bị từ chối, kể cả đang nháp.
+- Cố tải bản chính là Word/Excel: HTTP 400, vì văn bản chính chỉ được phép PDF.
+- Thay PDF chính khi chưa bỏ PDF chính cũ: HTTP 400; bỏ PDF chính mà không chọn PDF khác: HTTP 400.
+- Mở xem trước PDF trên browser; `.docx`/`.xlsx` xem nội dung chữ/bảng qua API có kiểm tra quyền; `.doc`/`.xls` hiện cần tải về.
 - Chỉ còn tệp Word/Excel không có PDF: tạo/sửa bản nháp vẫn được, nhưng **chuẩn bị PDF để ký** phải từ chối.
 - Tải tệp của cơ quan A từ cơ quan B trước khi gửi: 404; danh sách tệp bản nháp không được lộ.
 - Sửa/bỏ tệp ở bản nháp phải tạo phiên bản mới, không làm hỏng bản cũ; thử gửi và tải tệp đính kèm kiểm tra SHA-256.

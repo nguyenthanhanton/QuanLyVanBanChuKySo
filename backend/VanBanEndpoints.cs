@@ -104,7 +104,9 @@ public static class VanBanEndpoints
             var degree = form["doMat"].ToString();
             var urgency = form["doKhan"].ToString();
             var recipientRaw = form["maCoQuanNhan"].ToString();
-            var files = form.Files.GetFiles("tepDinhKem").Concat(form.Files.GetFiles("tepPdf")).ToArray();
+            var mainFile=form.Files.GetFile("tepVanBanChinh") ?? form.Files.GetFile("tepPdf");
+            var attachments=form.Files.GetFiles("tepDinhKem").ToArray();
+            var files=(mainFile==null?Array.Empty<IFormFile>():new[]{mainFile}).Concat(attachments).ToArray();
             if (title.Length is < 3 or > 300) return Results.BadRequest(new { message="Tiêu đề phải có 3–300 ký tự." });
             if (!new[] {"THUONG", "MAT", "TOI_MAT", "TUYET_MAT"}.Contains(degree))
                 return Results.BadRequest(new { message="Độ mật không hợp lệ." });
@@ -116,7 +118,9 @@ public static class VanBanEndpoints
             if(recipientValues.Length>20 || recipientValues.Any(x=>!int.TryParse(x,out var n)||n<=0))
                 return Results.BadRequest(new{message="Có tối đa 20 mã cơ quan nhận hợp lệ."});
             var recipients=recipientValues.Select(int.Parse).Distinct().ToArray();
-            if(files.Length==0)return Results.BadRequest(new{message="Cần ít nhất một tệp đính kèm."});
+            if(mainFile==null)return Results.BadRequest(new{message="Phải chọn văn bản chính dạng PDF để ký số."});
+            if(!Path.GetExtension(mainFile.FileName).Equals(".pdf",StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest(new{message="Văn bản chính phải là PDF; Word/Excel đặt ở mục tệp đính kèm."});
             var fileError=await DichVuTepVanBan.KiemTraDanhSach(files);
             if(fileError!=null)return Results.BadRequest(new{message=fileError});
 
@@ -162,10 +166,11 @@ public static class VanBanEndpoints
                 foreach(var recipient in recipients)await cn.ExecuteAsync(@"
                     INSERT dbo.NoiNhanDuKien(MaVanBan,MaCoQuanNhan)VALUES(@id,@recipient)",new{id,recipient},tx);
                 foreach(var item in saved)await cn.ExecuteAsync(@"
-                    INSERT dbo.TepDinhKem (MaTep,MaCoQuan,MaPhienBan,TenTep,LoaiNoiDung,KichThuoc,DuongDanLuuTru,MaBamSha256)
-                    VALUES (@fileId,@agency,@versionId,@filename,@mime,@length,@finalPath,@sha)",
+                    INSERT dbo.TepDinhKem (MaTep,MaCoQuan,MaPhienBan,TenTep,LoaiNoiDung,KichThuoc,DuongDanLuuTru,MaBamSha256,LaVanBanChinh)
+                    VALUES (@fileId,@agency,@versionId,@filename,@mime,@length,@finalPath,@sha,@isMain)",
                     new { fileId=item.MaTep,agency=actor.MaCoQuan,versionId,filename=item.TenTep,
-                        mime=item.LoaiNoiDung,length=item.KichThuoc,finalPath=item.DuongDanLuuTru,sha=item.MaBamSha256 }, tx);
+                        mime=item.LoaiNoiDung,length=item.KichThuoc,finalPath=item.DuongDanLuuTru,sha=item.MaBamSha256,
+                        isMain=item.MaTep==saved[0].MaTep }, tx);
                 await cn.ExecuteAsync(@"
                     INSERT dbo.LichSuVanBan (MaVanBan,MaCoQuan,MaNguoiThucHien,HanhDong,MoTa,TrangThaiSau,SoPhienBan)
                     VALUES (@id,@agency,@user,'TAO_MOI',N'Tạo văn bản dự thảo','NHAP',1)",
@@ -185,7 +190,7 @@ public static class VanBanEndpoints
             using var cn=db.Open();
             var revisions=await cn.QueryAsync(@"
                 SELECT p.MaPhienBan,p.SoPhienBan,p.TieuDe,p.TrichYeu,p.LyDoThayDoi,p.ThoiDiemTao,
-                       n.HoTen AS NguoiTao,t.MaTep,t.TenTep,t.MaBamSha256
+                       n.HoTen AS NguoiTao,t.MaTep,t.TenTep,t.MaBamSha256,t.LaVanBanChinh
                 FROM dbo.PhienBanVanBan p JOIN dbo.NguoiDung n ON n.MaNguoiDung=p.MaNguoiTao
                 LEFT JOIN dbo.TepDinhKem t ON t.MaPhienBan=p.MaPhienBan
                 WHERE p.MaVanBan=@id ORDER BY p.SoPhienBan DESC", new {id});
@@ -224,8 +229,8 @@ public static class VanBanEndpoints
                 new {versionId,id,ver,title=doc.TieuDe,notes=req.TrichYeu,user=actor.MaNguoiDung,reason=req.LyDo},tx);
             // Snapshot file duoc ke thua nhung khong ghi de ban truoc.
             await cn.ExecuteAsync(@"
-                INSERT dbo.TepDinhKem (MaCoQuan,MaPhienBan,TenTep,LoaiNoiDung,KichThuoc,DuongDanLuuTru,MaBamSha256)
-                SELECT MaCoQuan,@versionId,TenTep,LoaiNoiDung,KichThuoc,DuongDanLuuTru,MaBamSha256
+                INSERT dbo.TepDinhKem (MaCoQuan,MaPhienBan,TenTep,LoaiNoiDung,KichThuoc,DuongDanLuuTru,MaBamSha256,LaVanBanChinh)
+                SELECT MaCoQuan,@versionId,TenTep,LoaiNoiDung,KichThuoc,DuongDanLuuTru,MaBamSha256,LaVanBanChinh
                 FROM dbo.TepDinhKem WHERE MaPhienBan=(SELECT MaPhienBan FROM dbo.PhienBanVanBan WHERE MaVanBan=@id AND SoPhienBan=@prev)",
                 new{versionId,id,prev=doc.PhienBanHienTai},tx);
             await cn.ExecuteAsync(@"
@@ -251,6 +256,12 @@ public static class VanBanEndpoints
             if(await DichVuKyPdf.Bam(file.DuongDanLuuTru)!=file.MaBamSha256)
                 return Results.Conflict(new{message="Tệp đính kèm không còn toàn vẹn."});
             http.Response.Headers["X-Content-Type-Options"]="nosniff";
+            if(http.Request.Query.ContainsKey("preview")){
+                try {var text=DichVuTepVanBan.XemTruocOffice(file.DuongDanLuuTru);
+                    if(text==null)return Results.StatusCode(415);
+                    return Results.Text(text,"text/plain; charset=utf-8");}
+                catch(InvalidDataException){return Results.BadRequest(new{message="Tệp Office bị lỗi định dạng."});}
+            }
             return Results.File(file.DuongDanLuuTru,file.LoaiNoiDung,file.TenTep);
         });
 
