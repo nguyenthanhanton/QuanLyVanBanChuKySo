@@ -26,7 +26,7 @@ Kỳ vọng: một bản ghi version 7; CHECK cho phép `0..5`; quyền chuyên 
 
 1. **0.5.2:** Đã có API ký PDF người soạn và chặn submit; chưa có kiểm thử .NET/SQL Server thực tế (xem mục dưới).
 2. **0.5.3:** Đã viết mã ký 2–4 và chặn duyệt theo nhiệm vụ; cần kiểm thử .NET/SQL Server thực tế (xem bên dưới).
-3. **0.5.4:** cấp số không phá bốn chữ ký; chứng thư cơ quan ký lần 5, chỉ phát hành sau xác minh năm chữ ký.
+3. **0.5.4:** Đã có kiểm tra trước cấp số, ký cơ quan lần 5 và phát hành/giao nhận có xác minh 5 CMS; chưa có số và con dấu hiển thị trên trang PDF.
 4. **0.5.5:** giao diện hiển thị đủ năm vị trí, chữ ký hợp lệ và lịch sử theo người/thời gian, thử liên cơ quan A → B/C.
 
 Các chặng sau bắt buộc thử bằng .NET 8/SQL Server và trình đọc PDF độc lập. Không coi một bản ghi trong `ChuKySo` là bằng chứng chữ ký PDF hợp lệ nếu chưa xác minh CMS và toàn vẹn bản PDF.
@@ -58,3 +58,16 @@ Các chặng sau bắt buộc thử bằng .NET 8/SQL Server và trình đọc P
 7. **Kiểm thử file:** tải PDF đã ký ở mỗi cấp, xác minh số chữ ký CMS bằng công cụ PDF độc lập, mỗi bản mới nối tiếp bản trước và hash SHA-256 lưu ở `BanPdfDaKy` không thay đổi.
 
 **Còn thiếu ở 0.5.3:** hình ảnh chữ ký hiển thị trực tiếp trên PDF (ký CMS hiện vẫn vô hình); vị trí ký do người dùng chọn sẽ triển khai riêng. Chặng 0.5.4 phải bảo toàn bốn chữ ký sau cấp số rồi mới ký dấu cơ quan lần 5. Không thử nút chuẩn bị ký cũ sau cấp số và không phát hành bản chưa có ký cơ quan.
+
+## Chặng 0.5.4: ký số cơ quan và giao nhận (chờ nghiệm thu)
+
+**Điều kiện:** văn bản đang ở `CHO_CAP_SO` sau khi lãnh đạo ký 4/5 và duyệt. Tài khoản `vanthu_a` có quyền `registers.manage`, `signatures.manage-agency`, `signing.sign`, `publications.issue`, `publications.deliver`. Dùng chính bộ khóa AES/PFX đã tạo ở 0.5.2, không tạo mới.
+
+1. Đăng nhập `vanthu_a`, mở văn bản, nhấn **Cấp số văn bản**, nhập ký hiệu (ví dụ `CV-CQA`). Hệ thống kiểm tra bốn chữ ký CMS/hashes rồi cập nhật `SoPhatHanh`, `KyHieu`, `NgayBanHanh`; trạng thái `DA_CAP_SO`. Nếu không đủ bốn chữ ký hợp lệ, API cấp số trả **409**.
+2. Vào tab **Chữ ký số**, chọn loại chứng thư **Cơ quan (văn thư)**. Nhập tên, chọn tự ký thử nghiệm, mật khẩu tài khoản, nhấn **Lưu chứng thư**. Có thể tạo thêm chứng thư cơ quan dù đã có chứng thư cá nhân.
+3. Nhập lại mật khẩu tài khoản, nhấn **5/5. Văn thư ký số cơ quan**. API `POST /api/v1/documents/{id}/agency-signature` nhận `{ "loaiChuKy":"KY_CO_QUAN", "matKhau":"...", "maYeuCau":"<UUID mới>" }`. Trạng thái chuyển thành `DA_KY`; API verification phải trả **5 chữ ký** đều `ToanVenMatMa=true`, chữ ký cuối `BaoPhuToanBoBanHienTai=true`.
+4. Nhấn **Phát hành đến các cơ quan dự kiến**. Trạng thái `DA_PHAT_HANH` và mỗi bên nhận có một lượt `CHO_GUI`. Nếu chưa có chữ ký thứ 5, API phát hành trả 409.
+5. Vào **Giao nhận liên cơ quan** (tài khoản bên gửi), nhấn **Gửi văn bản** với từng cơ quan. Đăng nhập `vanthu_b` hoặc `vanthu_c` để kiểm tra **Văn bản đến**; tải PDF ký 5 lần, xem phụ lục Word/Excel/PDF. Xác minh PDF cuối bằng trình đọc PDF độc lập, đối chiếu hash các tệp và lịch sử gửi/nhận.
+6. **Kiểm thử âm:** ký cơ quan khi chưa cấp số, ký bằng chứng thư cá nhân thay cho chứng thư cơ quan, ký lại lần 5, sửa dữ liệu PDF trước gửi, hoặc xem tệp khi chưa gửi phải bị từ chối. Gửi lại cùng `MaYeuCau` không sinh lượt giao nhận trùng.
+
+**Giới hạn phải biết trước khi nghiệm thu:** Để bảo toàn bốn chữ ký trước, phiên bản này **chỉ ghi số/ký hiệu/ngày phát hành trong database và lịch sử, không viết lại nội dung trang PDF đã ký**. File PDF cuối cùng gồm năm CMS theo kiểu cập nhật tăng dần; nếu PDF gốc không chứa số/ký hiệu, trang PDF phát hành vẫn chưa thể hiện số đó bằng chữ. Cần hoàn thiện *vùng hiển thị số và dấu* trong một revision ký hợp lệ và kiểm tra bằng Adobe Acrobat/ứng dụng độc lập trước khi dùng cho văn bản chính thức. Không coi 0.5.4 đã đạt yêu cầu thể thức văn bản pháp lý.

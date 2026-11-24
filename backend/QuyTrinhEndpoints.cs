@@ -209,7 +209,7 @@ public static class QuyTrinhEndpoints
         }).RequireAuthorization();
 
         app.MapPost("/api/v1/registrations",async(CapSoVanBan body,HttpContext http,
-            PhanQuyen permission,Database db)=>{
+            PhanQuyen permission,Database db,DichVuKyPdf signer)=>{
             var(actor,error)=await permission.YeuCau(http,"registers.manage");
             if(error!=null)return error;
             if(actor!.MaCoQuan is null)return Results.Forbid();
@@ -225,6 +225,27 @@ public static class QuyTrinhEndpoints
             if(status==null){tx.Rollback();return Results.NotFound();}
             if(status!="CHO_CAP_SO"){
                 tx.Rollback();return Results.Conflict(new{message="Chỉ cấp số sau khi lãnh đạo phê duyệt."});
+            }
+            var currentVersion=await cn.ExecuteScalarAsync<int>(
+                "SELECT PhienBanHienTai FROM dbo.VanBan WHERE MaVanBan=@id AND MaCoQuan=@agency",
+                new{id=body.MaVanBan,agency=actor.MaCoQuan},tx);
+            var approved=await cn.QuerySingleOrDefaultAsync<BanPdf>(@"
+                SELECT p.MaBan,p.DuongDanLuuTru,p.MaBamSha256 FROM dbo.BanPdfDaKy p
+                JOIN dbo.ChuKySo s ON s.MaBanDaKy=p.MaBan
+                WHERE p.MaVanBan=@id AND p.SoPhienBan=@version AND p.ThuTuKy=4
+                    AND s.LoaiChuKy='KY_LANH_DAO' AND s.MaCoQuan=@agency",
+                new{id=body.MaVanBan,version=currentVersion,agency=actor.MaCoQuan},tx);
+            if(approved==null || !File.Exists(approved.DuongDanLuuTru) ||
+               !string.Equals(await DichVuKyPdf.Bam(approved.DuongDanLuuTru),approved.MaBamSha256,StringComparison.OrdinalIgnoreCase)){
+                tx.Rollback();return Results.Conflict(new{message="Thiếu PDF có đủ bốn chữ ký hợp lệ; không thể cấp số."});
+            }
+            try{
+                var signatures=signer.XacMinh(approved.DuongDanLuuTru);
+                if(signatures.Count!=4 || signatures.Any(s=>!s.ToanVenMatMa) || !signatures[^1].BaoPhuToanBoBanHienTai){
+                    tx.Rollback();return Results.Conflict(new{message="Bốn chữ ký trước cấp số không toàn vẹn."});
+                }
+            }catch(Exception ex)when(ex is System.Security.Cryptography.CryptographicException or InvalidDataException or iText.Kernel.Exceptions.PdfException){
+                tx.Rollback();return Results.Conflict(new{message="Không xác minh được PDF bốn chữ ký."});
             }
             var ngayVN=DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).Date;
             var nam=ngayVN.Year;

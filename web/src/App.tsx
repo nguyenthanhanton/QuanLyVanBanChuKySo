@@ -235,7 +235,7 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
     requestApi('/signing-credentials',token).then((x:Record<string,unknown>[])=>setCredentials(x)).catch(()=>{});
     requestApi(`/documents/${doc.id}/signatures/verification`,token).then((x:Record<string,unknown>)=>setVerify(x)).catch(()=>{});
   },[doc.id,token]);
-  const operation=async(kind:'prepare'|'sign'|'draft-sign'|'publish'|'verify'|'download',signature?:string)=>{
+  const operation=async(kind:'prepare'|'sign'|'draft-sign'|'agency-sign'|'publish'|'verify'|'download',signature?:string)=>{
     setBusy(true);setMessage('');
     try {
       if(kind==='download'){
@@ -243,11 +243,14 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
       } else if(kind==='verify'){
         setVerify(await requestApi(`/documents/${doc.id}/signatures/verification`,token));
       } else {
-        if((kind==='sign'||kind==='draft-sign')&&!accountPassword)throw new Error('Cần nhập mật khẩu để xác nhận ký.');
+        if((kind==='sign'||kind==='draft-sign'||kind==='agency-sign')&&!accountPassword)throw new Error('Cần nhập mật khẩu để xác nhận ký.');
         const endpoint=kind==='prepare'?`/documents/${doc.id}/prepared-pdf`:
           kind==='sign'?`/documents/${doc.id}/signatures`:
-          kind==='draft-sign'?`/documents/${doc.id}/draft-signature`:`/documents/${doc.id}/publications`;
-        const payload=kind==='sign'||kind==='draft-sign'?{loaiChuKy:kind==='draft-sign'?'KY_NGUOI_SOAN':signature,matKhau:accountPassword,maYeuCau:crypto.randomUUID()}:
+          kind==='draft-sign'?`/documents/${doc.id}/draft-signature`:
+          kind==='agency-sign'?`/documents/${doc.id}/agency-signature`:`/documents/${doc.id}/publications`;
+        const payload=kind==='sign'||kind==='draft-sign'||kind==='agency-sign'?{
+          loaiChuKy:kind==='draft-sign'?'KY_NGUOI_SOAN':kind==='agency-sign'?'KY_CO_QUAN':signature,
+          matKhau:accountPassword,maYeuCau:crypto.randomUUID()}:
           {maYeuCau:crypto.randomUUID()};
         await requestApi(endpoint,token,{method:'POST',body:JSON.stringify(payload)});
         setAccountPassword('');
@@ -307,7 +310,12 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
           onClick={()=>operation('sign','KY_LANH_DAO')}>4/5. Lãnh đạo ký phê duyệt</button>}
         <p className="fine-note">Chỉ người đang được giao xử lý mới được ký. Ký xong quay lại Hành trình để duyệt chuyển bước.</p>
       </div>}
-      {doc.status==='DA_CAP_SO'&&<p className="fine-note">Bước 5/5 ký chứng thư cơ quan và phát hành sẽ được triển khai ở phiên bản 0.5.4.</p>}
+      {doc.status==='DA_CAP_SO'&&<>
+        <p className="fine-note">Bước 5/5: Văn thư dùng chứng thư loại Cơ quan để ký bản PDF đã có bốn chữ ký. Số/ký hiệu được ghi vào sổ phát hành, chưa đóng dấu hiển thị trực tiếp lên trang PDF.</p>
+        {isAllowed(actor,'signing.sign')&&isAllowed(actor,'signatures.manage-agency')&&
+          <button className="primary small" disabled={busy||signatures.length!==4}
+            onClick={()=>operation('agency-sign')}>5/5. Văn thư ký số cơ quan</button>}
+      </>}
       {doc.status==='DA_KY'&&isAllowed(actor,'publications.issue')&&<button className="primary small" disabled={busy}
         onClick={()=>operation('publish')}>Phát hành đến các cơ quan dự kiến</button>}
       <div className="signature-step-actions"><button className="secondary small" disabled={busy} onClick={()=>operation('verify')}>Xác minh chữ ký</button>

@@ -6,6 +6,8 @@
 
 > **Chặng 0.5.3 (chờ nghiệm thu):** API `/api/v1/documents/{id}/signatures` nhận `KY_NHAY` (2), `KY_THE_THUC` (3), `KY_LANH_DAO` (4), yêu cầu đúng người được giao nhiệm vụ và chữ ký trước. API `/workflow/tasks/{taskId}/decisions` chặn `DUYET` nếu thiếu chữ ký hợp lệ của người xử lý; `TRA_SUA` vẫn được phép. Bắt buộc trưởng văn phòng, không bỏ qua ở cơ quan B/C. Giao diện mở nút ký theo bước của tài khoản và chỉ cho duyệt sau ký. **Chưa có hình ảnh chữ ký hiển thị và chưa ký cơ quan lần 5 / phát hành** (0.5.4). Xem [kiểm thử 0.5.3](docs/KIEM_THU_KY_05_CAP.md).
 
+> **Chặng 0.5.4 (chờ nghiệm thu):** Trước cấp số xác minh đủ 4 chữ ký CMS; sau khi số/ký hiệu ghi vào database, văn thư dùng chứng thư `CO_QUAN` để ký PDF lần thứ 5 ở endpoint `/api/v1/documents/{id}/agency-signature`. Phát hành/gửi/tải PDF chỉ chấp nhận bản ký 5 lần, tệp đính kèm được đóng băng riêng (không gửi lại bản PDF chính chưa ký). **Giới hạn quan trọng:** số/ký hiệu chưa được chèn hiển thị vào trang PDF đã ký, cũng chưa có hình chữ ký/con dấu; đây mới là luồng mật mã+database, chưa hoàn thành thể thức bản PDF. Xem [kiểm thử 0.5.4](docs/KIEM_THU_KY_05_CAP.md).
+
 Ứng dụng web quản lý văn bản đi/đến nhiều cơ quan, được dựng mới theo bộ tài liệu yêu cầu 01–08 cung cấp ngày 24/11/2026. Trọng tâm của bản đầu là **theo dõi hành trình văn bản và kiểm soát phạm vi dữ liệu**.
 
 > **Quan trọng:** Đây là **mã nguồn bản nền tảng chưa nghiệm thu toàn bộ UC001–UC032**. Đã bổ sung mã backend để ký mật mã CMS trong PDF tuần tự và phát hành/gửi/nhận liên cơ quan, nhưng **chưa có điều kiện chạy thử .NET/SQL Server và kiểm thử chữ ký PDF tích hợp**. Giao diện mặc định vẫn là demo. Không sử dụng cho dữ liệu sản xuất hoặc khẳng định hiệu lực pháp lý khi chưa kiểm thử, thẩm định và tích hợp CA.
