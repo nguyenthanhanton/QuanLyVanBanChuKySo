@@ -1,0 +1,343 @@
+/*
+  Khoi tao co so du lieu MOI cho do an Quan ly van ban chu ky so.
+  KHONG xoa / reset co so du lieu da co. Chay bang sqlcmd -i (ho tro GO).
+  Ten database, bang va cot: tieng Viet khong dau.
+  Du lieu nguoi dung: NVARCHAR, ho tro tieng Viet co dau.
+*/
+IF DB_ID(N'QuanLyVanBanChuKySo') IS NULL
+    CREATE DATABASE QuanLyVanBanChuKySo;
+GO
+USE QuanLyVanBanChuKySo;
+GO
+
+IF OBJECT_ID(N'dbo.PhienBanLuocDo', 'U') IS NOT NULL
+    THROW 51000, N'Co so du lieu da duoc khoi tao; khong chay lai migration 001.', 1;
+GO
+
+BEGIN TRANSACTION;
+
+CREATE TABLE dbo.PhienBanLuocDo (
+    SoPhienBan INT NOT NULL PRIMARY KEY,
+    TenPhienBan NVARCHAR(200) NOT NULL,
+    MaBam CHAR(64) NULL,
+    ThoiDiemApDung DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE TABLE dbo.CoQuan (
+    MaCoQuan INT IDENTITY(1,1) PRIMARY KEY,
+    MaDinhDanh VARCHAR(40) NOT NULL UNIQUE,
+    TenCoQuan NVARCHAR(200) NOT NULL,
+    DiaChi NVARCHAR(400) NULL,
+    DangHoatDong BIT NOT NULL DEFAULT 1,
+    ThoiDiemTao DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    PhienBanDong ROWVERSION
+);
+
+CREATE TABLE dbo.PhongBan (
+    MaPhongBan INT IDENTITY(1,1) PRIMARY KEY,
+    MaCoQuan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaDinhDanh VARCHAR(40) NOT NULL,
+    TenPhongBan NVARCHAR(200) NOT NULL,
+    DangHoatDong BIT NOT NULL DEFAULT 1,
+    PhienBanDong ROWVERSION,
+    CONSTRAINT UQ_PhongBan_CoQuan UNIQUE(MaCoQuan, MaDinhDanh),
+    CONSTRAINT UQ_PhongBan_MaKep UNIQUE(MaCoQuan, MaPhongBan)
+);
+
+CREATE TABLE dbo.NguoiDung (
+    MaNguoiDung INT IDENTITY(1,1) PRIMARY KEY,
+    MaCoQuan INT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaPhongBan INT NULL REFERENCES dbo.PhongBan(MaPhongBan),
+    TenDangNhap VARCHAR(100) NOT NULL UNIQUE,
+    MatKhauBam VARCHAR(300) NOT NULL,
+    HoTen NVARCHAR(150) NOT NULL,
+    ThuDienTu VARCHAR(200) NULL,
+    SoDienThoai VARCHAR(30) NULL,
+    ChucVu NVARCHAR(150) NULL,
+    MaNhanVien VARCHAR(40) NULL,
+    DangHoatDong BIT NOT NULL DEFAULT 1,
+    SoLanSai INT NOT NULL DEFAULT 0,
+    KhoaDen DATETIME2(3) NULL,
+    ThoiDiemTao DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    PhienBanDong ROWVERSION,
+    CONSTRAINT CK_NguoiDung_PhongBan CHECK (MaCoQuan IS NOT NULL OR MaPhongBan IS NULL),
+    CONSTRAINT FK_NguoiDung_PhongBanCungCoQuan FOREIGN KEY(MaCoQuan,MaPhongBan)
+      REFERENCES dbo.PhongBan(MaCoQuan,MaPhongBan)
+);
+
+CREATE TABLE dbo.VaiTro (
+    MaVaiTro INT IDENTITY(1,1) PRIMARY KEY,
+    MaDinhDanh VARCHAR(80) NOT NULL UNIQUE,
+    TenVaiTro NVARCHAR(150) NOT NULL,
+    LaVaiTroHeThong BIT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE dbo.Quyen (
+    MaQuyen INT IDENTITY(1,1) PRIMARY KEY,
+    MaDinhDanh VARCHAR(100) NOT NULL UNIQUE,
+    TenQuyen NVARCHAR(200) NOT NULL
+);
+
+CREATE TABLE dbo.VaiTroQuyen (
+    MaCoQuan INT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaVaiTro INT NOT NULL REFERENCES dbo.VaiTro(MaVaiTro),
+    MaQuyen INT NOT NULL REFERENCES dbo.Quyen(MaQuyen),
+    MaGan BIGINT IDENTITY(1,1) PRIMARY KEY,
+    CONSTRAINT UQ_VaiTroQuyen UNIQUE(MaCoQuan, MaVaiTro, MaQuyen)
+);
+
+CREATE TABLE dbo.NguoiDungVaiTro (
+    MaNguoiDung INT NOT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    MaVaiTro INT NOT NULL REFERENCES dbo.VaiTro(MaVaiTro),
+    MaCoQuan INT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaGan BIGINT IDENTITY(1,1) PRIMARY KEY,
+    CONSTRAINT UQ_NguoiDungVaiTro UNIQUE(MaNguoiDung, MaVaiTro, MaCoQuan)
+);
+
+CREATE TABLE dbo.CauHinhQuyTrinh (
+    MaCauHinh UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaCoQuan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    SoPhienBan INT NOT NULL,
+    CoKiemTraVanPhong BIT NOT NULL DEFAULT 1,
+    HanXuLyGio INT NOT NULL DEFAULT 48,
+    DangSuDung BIT NOT NULL DEFAULT 1,
+    NgayTao DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_CauHinhQuyTrinh UNIQUE(MaCoQuan, SoPhienBan),
+    CONSTRAINT CK_HanXuLyGio CHECK(HanXuLyGio BETWEEN 1 AND 720)
+);
+
+CREATE TABLE dbo.SoVanBan (
+    MaSo INT IDENTITY(1,1) PRIMARY KEY,
+    MaCoQuan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    Nam INT NOT NULL,
+    LoaiSo VARCHAR(20) NOT NULL,
+    TenSo NVARCHAR(150) NOT NULL,
+    SoDaCap INT NOT NULL DEFAULT 0,
+    CONSTRAINT UQ_SoVanBan UNIQUE(MaCoQuan, Nam, LoaiSo),
+    CONSTRAINT CK_SoVanBan_Loai CHECK (LoaiSo IN ('DI','DEN','MAT_DI','MAT_DEN'))
+);
+
+CREATE TABLE dbo.VanBan (
+    MaVanBan UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaCoQuan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaPhongBan INT NULL REFERENCES dbo.PhongBan(MaPhongBan),
+    MaNguoiTao INT NOT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    MaCauHinh UNIQUEIDENTIFIER NULL REFERENCES dbo.CauHinhQuyTrinh(MaCauHinh),
+    MaNoiBo VARCHAR(50) NOT NULL,
+    LoaiVanBan VARCHAR(10) NOT NULL DEFAULT 'DI',
+    TieuDe NVARCHAR(300) NOT NULL,
+    TrichYeu NVARCHAR(MAX) NULL,
+    DoMat VARCHAR(20) NOT NULL DEFAULT 'THUONG',
+    DoKhan VARCHAR(20) NOT NULL DEFAULT 'THUONG',
+    TrangThai VARCHAR(40) NOT NULL DEFAULT 'NHAP',
+    PhienBanHienTai INT NOT NULL DEFAULT 1,
+    SoPhatHanh INT NULL,
+    KyHieu NVARCHAR(80) NULL,
+    NgayBanHanh DATE NULL,
+    ThoiDiemTao DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    ThoiDiemCapNhat DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    PhienBanDong ROWVERSION,
+    CONSTRAINT UQ_VanBan_MaNoiBo UNIQUE(MaCoQuan, MaNoiBo),
+    CONSTRAINT CK_VanBan_Loai CHECK (LoaiVanBan IN ('DI','DEN')),
+    CONSTRAINT CK_VanBan_DoMat CHECK (DoMat IN ('THUONG','MAT','TOI_MAT','TUYET_MAT')),
+    CONSTRAINT CK_VanBan_DoKhan CHECK (DoKhan IN ('THUONG','KHAN','THUONG_KHAN','HOA_TOC')),
+    CONSTRAINT FK_VanBan_PhongBanCungCoQuan FOREIGN KEY(MaCoQuan,MaPhongBan)
+      REFERENCES dbo.PhongBan(MaCoQuan,MaPhongBan)
+);
+
+CREATE TABLE dbo.NoiNhanDuKien (
+    MaVanBan UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.VanBan(MaVanBan),
+    MaCoQuanNhan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    ThoiDiemTao DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    PRIMARY KEY(MaVanBan,MaCoQuanNhan)
+);
+
+CREATE TABLE dbo.PhienBanVanBan (
+    MaPhienBan UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaVanBan UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.VanBan(MaVanBan),
+    SoPhienBan INT NOT NULL,
+    TieuDe NVARCHAR(300) NOT NULL,
+    TrichYeu NVARCHAR(MAX) NULL,
+    MaNguoiTao INT NOT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    LyDoThayDoi NVARCHAR(1000) NULL,
+    ThoiDiemTao DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_PhienBanVanBan UNIQUE(MaVanBan, SoPhienBan)
+);
+
+CREATE TABLE dbo.TepDinhKem (
+    MaTep UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaCoQuan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaPhienBan UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.PhienBanVanBan(MaPhienBan),
+    TenTep NVARCHAR(255) NOT NULL,
+    LoaiNoiDung VARCHAR(100) NOT NULL,
+    KichThuoc BIGINT NOT NULL,
+    DuongDanLuuTru NVARCHAR(500) NOT NULL,
+    MaBamSha256 CHAR(64) NOT NULL,
+    ThoiDiemTao DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE TABLE dbo.TacVuXuLy (
+    MaTacVu UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaVanBan UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.VanBan(MaVanBan),
+    MaCoQuan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaNguoiDuocGiao INT NOT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    Buoc VARCHAR(45) NOT NULL,
+    TrangThai VARCHAR(20) NOT NULL DEFAULT 'CHO_XU_LY',
+    HanXuLy DATETIME2(3) NULL,
+    ThoiDiemTao DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    ThoiDiemHoanThanh DATETIME2(3) NULL,
+    PhienBanDuocDuyet INT NOT NULL
+);
+
+CREATE TABLE dbo.QuyetDinhXuLy (
+    MaQuyetDinh UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaTacVu UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.TacVuXuLy(MaTacVu),
+    MaNguoiQuyetDinh INT NOT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    KetQua VARCHAR(25) NOT NULL,
+    LyDo NVARCHAR(1000) NULL,
+    SoPhienBan INT NOT NULL,
+    ThoiDiem DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT CK_QuyetDinhXuLy_LyDo CHECK(KetQua <> 'TRA_SUA' OR (LyDo IS NOT NULL AND LEN(LTRIM(RTRIM(LyDo))) > 0))
+);
+
+CREATE TABLE dbo.ChuKySo (
+    MaChuKy UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaVanBan UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.VanBan(MaVanBan),
+    MaCoQuan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaNguoiKy INT NOT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    SoPhienBan INT NOT NULL,
+    LoaiChuKy VARCHAR(30) NOT NULL,
+    DinhDangChuKy VARCHAR(40) NOT NULL,
+    DuLieuChuKy VARBINARY(MAX) NOT NULL,
+    ChungThuCongKhai VARBINARY(MAX) NOT NULL,
+    MaBamTaiLieu CHAR(64) NOT NULL,
+    MaBamChuKyTruoc CHAR(64) NULL,
+    ThoiDiemKy DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    KetQuaXacMinh VARCHAR(30) NOT NULL DEFAULT 'CHUA_XAC_MINH',
+    MucDoTinCay VARCHAR(30) NOT NULL DEFAULT 'INTERNAL_SELF_SIGNED',
+    CONSTRAINT UQ_ChuKySo_VanBan_Loai UNIQUE(MaVanBan, SoPhienBan, LoaiChuKy)
+);
+
+CREATE TABLE dbo.BanPhatHanh (
+    MaPhatHanh UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaVanBan UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.VanBan(MaVanBan),
+    MaCoQuanPhatHanh INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaNguoiPhatHanh INT NOT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    SoPhienBan INT NOT NULL,
+    MaBamBanCuoi CHAR(64) NOT NULL,
+    TrangThai VARCHAR(30) NOT NULL DEFAULT 'DA_PHAT_HANH',
+    ThoiDiemPhatHanh DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    PhienBanDong ROWVERSION,
+    CONSTRAINT UQ_BanPhatHanh_VanBan UNIQUE(MaVanBan)
+);
+
+CREATE TABLE dbo.LuotChuyenVanBan (
+    MaLuotChuyen UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaPhatHanh UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.BanPhatHanh(MaPhatHanh),
+    MaCoQuanGui INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaCoQuanNhan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaNguoiGui INT NOT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    MaNguoiNhan INT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    TrangThai VARCHAR(30) NOT NULL DEFAULT 'CHO_GUI',
+    ThoiDiemGui DATETIME2(3) NULL,
+    ThoiDiemNhan DATETIME2(3) NULL,
+    LyDoTuChoi NVARCHAR(1000) NULL,
+    SoLanGui INT NOT NULL DEFAULT 0,
+    LoiGanNhat NVARCHAR(1000) NULL,
+    PhienBanDong ROWVERSION,
+    CONSTRAINT UQ_LuotChuyenVanBan UNIQUE(MaPhatHanh, MaCoQuanNhan),
+    CONSTRAINT CK_LuotChuyenVanBan_Dich CHECK(MaCoQuanGui <> MaCoQuanNhan)
+);
+
+CREATE TABLE dbo.VanBanDen (
+    MaVanBanDen UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaCoQuanNhan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaLuotChuyen UNIQUEIDENTIFIER NULL REFERENCES dbo.LuotChuyenVanBan(MaLuotChuyen),
+    MaNguoiTiepNhan INT NOT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    SoDen INT NULL,
+    Nam INT NOT NULL,
+    TieuDe NVARCHAR(300) NOT NULL,
+    TrangThai VARCHAR(30) NOT NULL DEFAULT 'CHO_DANG_KY',
+    ThoiDiemTiepNhan DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    PhienBanDong ROWVERSION,
+    CONSTRAINT CK_VanBanDen_So CHECK(SoDen IS NULL OR SoDen > 0)
+);
+
+CREATE TABLE dbo.LichSuVanBan (
+    MaLichSu BIGINT IDENTITY(1,1) PRIMARY KEY,
+    MaVanBan UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.VanBan(MaVanBan),
+    MaCoQuan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaNguoiThucHien INT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    MaLuotChuyen UNIQUEIDENTIFIER NULL REFERENCES dbo.LuotChuyenVanBan(MaLuotChuyen),
+    HanhDong VARCHAR(60) NOT NULL,
+    MoTa NVARCHAR(1000) NOT NULL,
+    TrangThaiTruoc VARCHAR(50) NULL,
+    TrangThaiSau VARCHAR(50) NULL,
+    SoPhienBan INT NULL,
+    PhamViHienThi VARCHAR(20) NOT NULL DEFAULT 'NOI_BO',
+    ThoiDiem DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT CK_LichSuVanBan_PhamVi CHECK(PhamViHienThi IN ('NOI_BO','GIAO_NHAN'))
+);
+
+CREATE TABLE dbo.ThongBao (
+    MaThongBao UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaCoQuan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaNguoiNhan INT NOT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    MaVanBan UNIQUEIDENTIFIER NULL REFERENCES dbo.VanBan(MaVanBan),
+    NoiDung NVARCHAR(500) NOT NULL,
+    DaDoc BIT NOT NULL DEFAULT 0,
+    ThoiDiem DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE TABLE dbo.HoSo (
+    MaHoSo UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaCoQuan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    TenHoSo NVARCHAR(250) NOT NULL,
+    MoTa NVARCHAR(1000) NULL,
+    TrangThai VARCHAR(20) NOT NULL DEFAULT 'DANG_MO',
+    ViTriBanGiay NVARCHAR(500) NULL,
+    MaNguoiTao INT NOT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    ThoiDiemTao DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE TABLE dbo.HoSoVanBan (
+    MaHoSo UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.HoSo(MaHoSo),
+    MaVanBan UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.VanBan(MaVanBan),
+    PRIMARY KEY(MaHoSo, MaVanBan)
+);
+
+CREATE TABLE dbo.BienNhanLenh (
+    MaBienNhan UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+    MaCoQuan INT NOT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaNguoiThucHien INT NOT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    MaYeuCau UNIQUEIDENTIFIER NOT NULL,
+    LoaiLenh VARCHAR(70) NOT NULL,
+    KetQuaJson NVARCHAR(MAX) NOT NULL,
+    ThoiDiem DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_BienNhanLenh UNIQUE(MaCoQuan, MaYeuCau, LoaiLenh)
+);
+
+CREATE TABLE dbo.NhatKyHeThong (
+    MaNhatKy BIGINT IDENTITY(1,1) PRIMARY KEY,
+    MaCoQuan INT NULL REFERENCES dbo.CoQuan(MaCoQuan),
+    MaNguoiDung INT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
+    LoaiNhatKy VARCHAR(20) NOT NULL,
+    HanhDong VARCHAR(80) NOT NULL,
+    MoTa NVARCHAR(500) NOT NULL,
+    ThoiDiem DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT CK_NhatKyHeThong_Loai CHECK(LoaiNhatKy IN ('KY_THUAT','NGHIEP_VU'))
+);
+
+CREATE INDEX IX_VanBan_CoQuan_TrangThai ON dbo.VanBan(MaCoQuan, TrangThai, ThoiDiemTao DESC);
+CREATE INDEX IX_TacVuXuLy_Nguoi_TrangThai ON dbo.TacVuXuLy(MaNguoiDuocGiao, TrangThai);
+CREATE INDEX IX_LichSuVanBan_VanBan_ThoiDiem ON dbo.LichSuVanBan(MaVanBan, ThoiDiem, MaLichSu);
+CREATE INDEX IX_LuotChuyenVanBan_CoQuanNhan ON dbo.LuotChuyenVanBan(MaCoQuanNhan, TrangThai);
+CREATE INDEX IX_VanBanDen_CoQuanNhan ON dbo.VanBanDen(MaCoQuanNhan, TrangThai);
+CREATE UNIQUE INDEX UX_VanBanDen_LuotChuyen ON dbo.VanBanDen(MaLuotChuyen) WHERE MaLuotChuyen IS NOT NULL;
+CREATE UNIQUE INDEX UX_VanBanDen_So ON dbo.VanBanDen(MaCoQuanNhan,Nam,SoDen) WHERE SoDen IS NOT NULL;
+CREATE INDEX IX_ThongBao_NguoiNhan ON dbo.ThongBao(MaNguoiNhan, DaDoc, ThoiDiem DESC);
+
+INSERT dbo.PhienBanLuocDo (SoPhienBan, TenPhienBan)
+VALUES (1, N'Khởi tạo cơ sở dữ liệu và mô hình hành trình văn bản');
+COMMIT TRANSACTION;
+GO

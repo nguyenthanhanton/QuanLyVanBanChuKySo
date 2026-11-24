@@ -1,0 +1,27 @@
+# Frontend
+web/node_modules/
+web/dist/
+web/.env
+web/.env.local
+
+# .NET
+**/bin/
+**/obj/
+*.user
+*.suo
+
+# Private keys, local records and uploaded content
+*.pfx
+*.p12
+*.pem
+*.key
+*.sqlite
+*.db
+storage/
+secrets/
+keyring/
+
+# System/editor
+.DS_Store
+.vs/
+.vscode/
