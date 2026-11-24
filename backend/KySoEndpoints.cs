@@ -248,8 +248,9 @@ public static class KySoEndpoints
             var signedPath=TaoDuongDan(config,actor.MaCoQuan.Value,id,signedId);
             var field=$"Ky_1_{id:N}_v{doc.PhienBanHienTai}";
             try {
-                // Copy the unsigned PDF without inserting an issue number. No earlier revision is modified.
-                File.Copy(source.DuongDanLuuTru,baselinePath);
+                // Rewrite the unsigned draft once to repair recoverable xref issues before append signing.
+                // Original uploaded PDF is untouched; all subsequent signatures remain append-only.
+                signer.TaoBanNenKyDau(source.DuongDanLuuTru,baselinePath);
                 var baselineHash=await DichVuKyPdf.Bam(baselinePath);
                 var result=signer.Ky(baselinePath,signedPath,field,cert.MaChungThu,
                     actor.MaCoQuan.Value,actor.MaNguoiDung,cert.DuongDanKhoaMaHoa,"KY_NGUOI_SOAN",

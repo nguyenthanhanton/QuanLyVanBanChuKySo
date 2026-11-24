@@ -115,6 +115,27 @@ public sealed class DichVuKyPdf(IConfiguration config)
 
     public sealed record KetQuaKy(string TenTruongKy,byte[] DuLieuCms,byte[] ChungThuCongKhai);
 
+    // Normalize only the unsigned source before the very first signature.
+    // iText append-mode signing cannot operate on PDFs whose xref needed recovery.
+    // Never call this on PDFs containing signatures: rewriting would invalidate them.
+    public void TaoBanNenKyDau(string source,string destination)
+    {
+        using(var original=new PdfDocument(new PdfReader(source))){
+            if(new SignatureUtil(original).GetSignatureNames().Count!=0)
+                throw new InvalidDataException("PDF nguồn đã có chữ ký; không thể chuẩn hóa trước ký lần đầu.");
+            if(original.GetNumberOfPages()==0)
+                throw new InvalidDataException("PDF nguồn không có trang.");
+        }
+        using(var normalized=new PdfDocument(new PdfReader(source),new PdfWriter(destination))){
+            if(normalized.GetNumberOfPages()==0)
+                throw new InvalidDataException("Không chuẩn hóa được PDF nguồn.");
+        }
+        using(var check=new PdfDocument(new PdfReader(destination))){
+            if(check.GetReader().HasRebuiltXref() || check.GetReader().HasFixedXref())
+                throw new InvalidDataException("PDF chuẩn hóa vẫn bị lỗi cấu trúc; hãy xuất lại PDF từ phần mềm gốc.");
+        }
+    }
+
     // Relative coordinates from the top-left, independent of source page size.
     public sealed record ViTriHienThi(byte[]? AnhPng,int Trang,float X,float Y,float Rong,float Cao,string Nhan);
 
