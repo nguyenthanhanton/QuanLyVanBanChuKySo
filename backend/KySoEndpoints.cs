@@ -5,7 +5,9 @@ using Dapper;
 public sealed record TaoChungThuKy(string LoaiChungThu,string TenChungThu,string MatKhau,
     bool TaoChungThuThuNghiem);
 public sealed record ChuanBiPdf(Guid MaYeuCau);
-public sealed record KyVanBan(string LoaiChuKy,string MatKhau,Guid MaYeuCau);
+public sealed record KyVanBan(string LoaiChuKy,string MatKhau,Guid MaYeuCau,
+    string? HinhAnhKyBase64=null,int? TrangKy=null,float? TyLeX=null,float? TyLeY=null,
+    float? TyLeRong=null,float? TyLeCao=null);
 
 public sealed class HoSoKy {
     public Guid MaVanBan {get;set;}
@@ -38,6 +40,27 @@ public sealed class NguonPdf {
 
 public static class KySoEndpoints
 {
+    internal static DichVuKyPdf.ViTriHienThi? ViTriKy(KyVanBan request,string label,bool agency=false)
+    {
+        if(string.IsNullOrWhiteSpace(request.HinhAnhKyBase64) && !agency)return null;
+        byte[]? image=null;
+        if(!string.IsNullOrWhiteSpace(request.HinhAnhKyBase64)){
+            if(request.HinhAnhKyBase64.Length>1_400_000)
+                throw new InvalidDataException("Ảnh chữ ký vượt giới hạn 1 MB.");
+            try {image=Convert.FromBase64String(request.HinhAnhKyBase64);}
+            catch(FormatException){throw new InvalidDataException("Ảnh chữ ký không phải Base64 hợp lệ.");}
+            if(image.Length>1_048_576 || image.Length<24 ||
+               !image.AsSpan(0,8).SequenceEqual(new byte[]{137,80,78,71,13,10,26,10}))
+                throw new InvalidDataException("Chỉ hỗ trợ ảnh chữ ký PNG tối đa 1 MB.");
+            var width=System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(image.AsSpan(16,4));
+            var height=System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(image.AsSpan(20,4));
+            if(width is 0 or >4096 || height is 0 or >4096)
+                throw new InvalidDataException("Ảnh chữ ký không được vượt 4096 pixel mỗi chiều.");
+        }
+        return new DichVuKyPdf.ViTriHienThi(image,request.TrangKy??1,
+            request.TyLeX??0.60f,request.TyLeY??0.73f,request.TyLeRong??0.32f,
+            request.TyLeCao??0.11f,label);
+    }
     internal static string TaoDuongDan(IConfiguration config,int agency,Guid doc,Guid fileId)
     {
         var root=config["Storage:RootPath"];
@@ -222,7 +245,8 @@ public static class KySoEndpoints
                 File.Copy(source.DuongDanLuuTru,baselinePath);
                 var baselineHash=await DichVuKyPdf.Bam(baselinePath);
                 var result=signer.Ky(baselinePath,signedPath,field,cert.MaChungThu,
-                    actor.MaCoQuan.Value,actor.MaNguoiDung,cert.DuongDanKhoaMaHoa,"KY_NGUOI_SOAN");
+                    actor.MaCoQuan.Value,actor.MaNguoiDung,cert.DuongDanKhoaMaHoa,"KY_NGUOI_SOAN",
+                    ViTriKy(request,"Nguoi soan"));
                 var checks=signer.XacMinh(signedPath);
                 if(checks.Count!=1 || !checks[0].ToanVenMatMa || !checks[0].BaoPhuToanBoBanHienTai)
                     throw new CryptographicException("PDF người soạn ký không toàn vẹn hoặc chứa chữ ký không mong đợi.");
@@ -375,7 +399,8 @@ public static class KySoEndpoints
             var field=$"Ky_{stage.Order}_{id:N}_v{doc.PhienBanHienTai}";
             try {
                 var signed=signer.Ky(previous.DuongDanLuuTru,path,field,cert.MaChungThu,
-                    actor.MaCoQuan.Value,owner,cert.DuongDanKhoaMaHoa,request.LoaiChuKy!);
+                    actor.MaCoQuan.Value,owner,cert.DuongDanKhoaMaHoa,request.LoaiChuKy!,
+                    ViTriKy(request,stage.Order switch{2=>"Ky nhay",3=>"Kiem tra the thuc",_=>"Lanh dao"}));
                 var verified=signer.XacMinh(path);
                 if(verified.Count!=stage.Order || verified.Any(s=>!s.ToanVenMatMa) ||
                    !verified[^1].BaoPhuToanBoBanHienTai)
@@ -466,7 +491,8 @@ public static class KySoEndpoints
             var field=$"Ky_5_{id:N}_v{doc.PhienBanHienTai}";
             try{
                 var signed=signer.Ky(prior.DuongDanLuuTru,path,field,cert.MaChungThu,
-                    actor.MaCoQuan.Value,null,cert.DuongDanKhoaMaHoa,"KY_CO_QUAN");
+                    actor.MaCoQuan.Value,null,cert.DuongDanKhoaMaHoa,"KY_CO_QUAN",
+                    ViTriKy(request,$"So: {doc.SoPhatHanh}/{doc.KyHieu}",true));
                 var checks=signer.XacMinh(path);
                 if(checks.Count!=5 || checks.Any(s=>!s.ToanVenMatMa) || !checks[^1].BaoPhuToanBoBanHienTai)
                     throw new CryptographicException("Chuỗi năm chữ ký PDF không toàn vẹn.");

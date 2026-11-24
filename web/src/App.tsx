@@ -226,6 +226,13 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
   const [certType,setCertType]=useState('CA_NHAN');
   const [testCert,setTestCert]=useState(false);
   const [pfxFile,setPfxFile]=useState<File>();
+  const [signatureImage,setSignatureImage]=useState<File>();
+  const [signaturePage,setSignaturePage]=useState(1);
+  const [signatureX,setSignatureX]=useState(60);
+  const [signatureY,setSignatureY]=useState(73);
+  const [signatureWidth,setSignatureWidth]=useState(32);
+  const [signatureHeight,setSignatureHeight]=useState(11);
+  const [signedPreview,setSignedPreview]=useState(false);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [verify,setVerify]=useState<Record<string,unknown>|null>(null);
@@ -248,9 +255,23 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
           kind==='sign'?`/documents/${doc.id}/signatures`:
           kind==='draft-sign'?`/documents/${doc.id}/draft-signature`:
           kind==='agency-sign'?`/documents/${doc.id}/agency-signature`:`/documents/${doc.id}/publications`;
+        let imageBase64:string|undefined;
+        if(signatureImage&&(kind==='sign'||kind==='draft-sign'||kind==='agency-sign')){
+          if(signatureImage.size>1024*1024||signatureImage.type!=='image/png')
+            throw new Error('Ảnh ký phải là PNG tối đa 1 MB.');
+          const url=await new Promise<string>((resolve,reject)=>{
+            const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));
+            reader.onerror=()=>reject(new Error('Không đọc được ảnh chữ ký.'));
+            reader.readAsDataURL(signatureImage);
+          });
+          imageBase64=url.split(',')[1];
+        }
         const payload=kind==='sign'||kind==='draft-sign'||kind==='agency-sign'?{
           loaiChuKy:kind==='draft-sign'?'KY_NGUOI_SOAN':kind==='agency-sign'?'KY_CO_QUAN':signature,
-          matKhau:accountPassword,maYeuCau:crypto.randomUUID()}:
+          matKhau:accountPassword,maYeuCau:crypto.randomUUID(),
+          hinhAnhKyBase64:imageBase64,trangKy:signaturePage,
+          tyLeX:signatureX/100,tyLeY:signatureY/100,
+          tyLeRong:signatureWidth/100,tyLeCao:signatureHeight/100}:
           {maYeuCau:crypto.randomUUID()};
         await requestApi(endpoint,token,{method:'POST',body:JSON.stringify(payload)});
         setAccountPassword('');
@@ -296,6 +317,29 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
         !isAllowed(actor,certType==='CA_NHAN'?'signatures.manage-own':'signatures.manage-agency')}
         onClick={createCredential}>Lưu chứng thư</button></div>
     <div className="form-section"><h4>Các bước ký và phát hành</h4>
+      {['NHAP','TRA_SUA','CHO_DUYET','DA_CAP_SO'].includes(doc.status)&&<div className="form-section">
+        <h4>Hình chữ ký và vị trí trên PDF (cho lần ký mới)</h4>
+        <p className="fine-note">Chọn PNG nền trong suốt, tối đa 1 MB. Tọa độ tính theo % từ mép trái và mép trên của trang PDF. Hệ thống nhúng ảnh vào vùng chữ ký CMS trong chính lần ký, không sửa PDF sau ký. Không hỗ trợ trang bị xoay.</p>
+        <label>Ảnh chữ ký / con dấu (PNG)
+          <input type="file" accept="image/png,.png" onChange={e=>setSignatureImage(e.target.files?.[0])}/>
+        </label>
+        <div className="form-grid">
+          <label>Trang đặt chữ ký<input type="number" min="1" step="1" value={signaturePage}
+            onChange={e=>setSignaturePage(Number(e.target.value))}/></label>
+          <label>Từ trái (%)<input type="number" min="0" max="100" step="1" value={signatureX}
+            onChange={e=>setSignatureX(Number(e.target.value))}/></label>
+          <label>Từ trên (%)<input type="number" min="0" max="100" step="1" value={signatureY}
+            onChange={e=>setSignatureY(Number(e.target.value))}/></label>
+          <label>Chiều rộng (%)<input type="number" min="1" max="100" step="1" value={signatureWidth}
+            onChange={e=>setSignatureWidth(Number(e.target.value))}/></label>
+          <label>Chiều cao (%)<input type="number" min="1" max="100" step="1" value={signatureHeight}
+            onChange={e=>setSignatureHeight(Number(e.target.value))}/></label>
+        </div>
+        <p className="fine-note">Vùng dự kiến: trang {signaturePage}, trái {signatureX}%, trên {signatureY}%, rộng {signatureWidth}%, cao {signatureHeight}%. Tránh che nội dung; kiểm tra trang PDF sau ký trước khi duyệt.</p>
+        <button className="secondary small" disabled={busy} onClick={()=>setSignedPreview(true)}>Xem PDF đã ký hiện tại</button>
+        {signedPreview&&<FilePreview path={`/documents/${doc.id}/signed-pdf`} filename={`van-ban-${doc.code}.pdf`}
+          token={token} onClose={()=>setSignedPreview(false)}/>}
+      </div>}
       {(doc.status==='NHAP'||doc.status==='TRA_SUA')&&isAllowed(actor,'signing.sign')&&<>
         <p className="fine-note">Bước 1/5: Người tạo văn bản ký trực tiếp PDF chính của phiên bản hiện tại trước khi trình duyệt. Nếu chỉnh sửa tệp, phải ký lại phiên bản mới.</p>
         <button className="primary small" disabled={busy||signatures.length>0}
@@ -374,6 +418,8 @@ function LiveDeliveries({token,direction,onUpdated}:{token:string;direction:'out
             {' · Gửi: '}{formatDate(String(field(row,'ThoiDiemGui')??''))}</small></div>
         <Status status={status} small/>
         <div className="delivery-live-actions">
+          <button className="secondary small" onClick={()=>setPreview({path:`/deliveries/${id}/pdf`,name:`van-ban-${id}.pdf`})}>
+            Xem PDF</button>
           <button className="secondary small" disabled={busy===id} onClick={()=>perform(row,'pdf')}>Tải PDF</button>
           {status!=='CHO_GUI'&&<button className="secondary small" disabled={busy===id} onClick={()=>showAttachments(id)}>
             <Files size={14}/> {expanded===id?'Ẩn tệp':'Tệp đính kèm'}</button>}

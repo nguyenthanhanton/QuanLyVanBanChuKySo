@@ -27,7 +27,7 @@ Kỳ vọng: một bản ghi version 7; CHECK cho phép `0..5`; quyền chuyên 
 1. **0.5.2:** Đã có API ký PDF người soạn và chặn submit; chưa có kiểm thử .NET/SQL Server thực tế (xem mục dưới).
 2. **0.5.3:** Đã viết mã ký 2–4 và chặn duyệt theo nhiệm vụ; cần kiểm thử .NET/SQL Server thực tế (xem bên dưới).
 3. **0.5.4:** Đã có kiểm tra trước cấp số, ký cơ quan lần 5 và phát hành/giao nhận có xác minh 5 CMS; chưa có số và con dấu hiển thị trên trang PDF.
-4. **0.5.5:** giao diện hiển thị đủ năm vị trí, chữ ký hợp lệ và lịch sử theo người/thời gian, thử liên cơ quan A → B/C.
+4. **0.5.5:** Đã viết mã ảnh PNG cho vùng ký mới, tọa độ trang PDF, xem PDF giao nhận; cần kiểm thử iText/.NET, độ hiển thị và trình xác minh độc lập.
 
 Các chặng sau bắt buộc thử bằng .NET 8/SQL Server và trình đọc PDF độc lập. Không coi một bản ghi trong `ChuKySo` là bằng chứng chữ ký PDF hợp lệ nếu chưa xác minh CMS và toàn vẹn bản PDF.
 
@@ -71,3 +71,17 @@ Các chặng sau bắt buộc thử bằng .NET 8/SQL Server và trình đọc P
 6. **Kiểm thử âm:** ký cơ quan khi chưa cấp số, ký bằng chứng thư cá nhân thay cho chứng thư cơ quan, ký lại lần 5, sửa dữ liệu PDF trước gửi, hoặc xem tệp khi chưa gửi phải bị từ chối. Gửi lại cùng `MaYeuCau` không sinh lượt giao nhận trùng.
 
 **Giới hạn phải biết trước khi nghiệm thu:** Để bảo toàn bốn chữ ký trước, phiên bản này **chỉ ghi số/ký hiệu/ngày phát hành trong database và lịch sử, không viết lại nội dung trang PDF đã ký**. File PDF cuối cùng gồm năm CMS theo kiểu cập nhật tăng dần; nếu PDF gốc không chứa số/ký hiệu, trang PDF phát hành vẫn chưa thể hiện số đó bằng chữ. Cần hoàn thiện *vùng hiển thị số và dấu* trong một revision ký hợp lệ và kiểm tra bằng Adobe Acrobat/ứng dụng độc lập trước khi dùng cho văn bản chính thức. Không coi 0.5.4 đã đạt yêu cầu thể thức văn bản pháp lý.
+
+## Chặng 0.5.5: vùng ký hiển thị và kiểm thử độc lập (chờ nghiệm thu)
+
+**Quy tắc:** dùng **văn bản thử nghiệm mới** để có đủ năm chữ ký kèm hình ảnh. Không được sửa các PDF đã ký của văn bản cũ để thêm ảnh. Mỗi người chuẩn bị PNG nền trong suốt riêng (văn thư chuẩn bị PNG con dấu thử nghiệm). Chỉ kiểm tra mẫu giả lập, không dùng ảnh chữ ký/con dấu thật trong môi trường demo.
+
+1. Ở tab **Chữ ký số**, trước khi ký chọn ảnh `.png` tối đa 1 MB, kích thước mỗi chiều tối đa 4096 px. Chọn trang 1 và vị trí `trái=60%`, `trên=73%`, `rộng=32%`, `cao=11%` (thay theo bố cục tài liệu). Tỷ lệ từ mép trái/trên; không cho vùng vượt trang. Đối với các trang PDF có rotation khác 0, API từ chối vì chưa hỗ trợ chính xác tọa độ.
+2. Ký lần 1 người soạn. Tải PDF và kiểm tra vùng hình ký hiển thị, chữ ký CMS có `ToanVenMatMa=true`. Sau đó trình duyệt.
+3. Lần lượt dùng trưởng phòng, trưởng văn phòng, lãnh đạo: mỗi người chọn PNG riêng và vị trí khác không che nội dung, ký lần 2/3/4, xác minh số chữ ký tăng đúng thứ tự; thử duyệt khi chưa ký vẫn trả 409.
+4. Văn thư cấp số, tạo/nhập chứng thư cơ quan và chọn PNG con dấu. Lần ký 5 phải có nhãn số/ký hiệu trong vùng chữ ký và hình dấu (tùy bố cục), số trong database phải khớp nội dung vùng ký. Xác minh cả năm chữ ký CMS và tải bản PDF cuối.
+5. Mở PDF bằng **Adobe Acrobat Reader** hoặc một trình xác minh PDF độc lập: ghi nhận trạng thái xác minh từng chữ ký, việc trình đọc báo tài liệu có bản cập nhật sau chữ ký trước và chứng thư tự ký không tin cậy. Không đánh đồng `ToanVenMatMa=true` với trạng thái tin cậy của CA hay chữ ký có giá trị pháp lý.
+6. Kiểm thử âm: ảnh JPEG/SVG, ảnh hơn 1 MB, trang ngoài phạm vi, vùng vượt mép, trang bị xoay, chữ ký sai tài khoản, tệp PDF bị sửa, xác minh các hash và các bản lịch sử bất biến.
+7. Phát hành → gửi từ A → tiếp nhận ở B, mở **Xem PDF** trực tiếp trong **Văn bản đến**; tải và so sánh PDF, phụ lục, hành trình, ngày giờ và trạng thái từng cơ quan. Cơ quan chưa nhận không được đọc bản nháp.
+
+**Giới hạn kỹ thuật hiện tại:** Các vị trí được nhập dưới dạng phần trăm, chưa có thao tác kéo-thả trực tiếp trên PDF; bản xem PDF sử dụng trình xem PDF nhúng của trình duyệt. Tính chính xác/khả năng hiển thị vùng ký iText phải được thử trên .NET 8 và từng mẫu PDF thực tế. Chức năng ảnh chỉ áp dụng cho **chữ ký mới**, không thêm ảnh vào chữ ký lịch sử. Chưa có kiểm định chữ ký pháp lý CA, thu hồi OCSP/CRL hay timestamp TSA.
