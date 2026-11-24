@@ -357,8 +357,8 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
             setSignatureWidth(value.width);setSignatureHeight(value.height);
             setPlacementConfirmed(true);setPlacementOpen(false);
           }}/>}
-        <button className="secondary small" disabled={busy} onClick={()=>setSignedPreview(true)}>Xem PDF đã ký hiện tại</button>
-        {signedPreview&&<FilePreview path={`/documents/${doc.id}/signed-pdf`} filename={`van-ban-${doc.code}.pdf`}
+        <button className="secondary small" disabled={busy||!mainPdfPath} onClick={()=>setSignedPreview(true)}>Xem văn bản chính</button>
+        {signedPreview&&<FilePreview path={signatures.length>0?`/documents/${doc.id}/signed-pdf`:mainPdfPath} filename={`van-ban-${doc.code}.pdf`}
           token={token} onClose={()=>setSignedPreview(false)}/>}
       </div>}
       {(doc.status==='NHAP'||doc.status==='TRA_SUA')&&isAllowed(actor,'signing.sign')&&<>
@@ -466,6 +466,7 @@ function LiveDeliveries({token,direction,onUpdated}:{token:string;direction:'out
 
 function DraftAttachmentEditor({doc,actor,token,onUpdated}:{doc:VanBan;actor:Actor|null;token:string;onUpdated:()=>Promise<void>}) {
   const [attachments,setAttachments]=useState<Record<string,unknown>[]>([]);
+  const [mainSigned,setMainSigned]=useState(false);
   const [versionToken,setVersionToken]=useState('');
   const [excerpt,setExcerpt]=useState(doc.excerpt);
   const [removed,setRemoved]=useState<string[]>([]);
@@ -481,6 +482,14 @@ function DraftAttachmentEditor({doc,actor,token,onUpdated}:{doc:VanBan;actor:Act
     ]);
     setAttachments(files);setVersionToken(String(field(details,'PhienBanDong')??''));
     setExcerpt(String(field(details,'TrichYeu')??''));setRemoved([]);setNewFiles([]);setNewMain(null);
+    // One logical main document: after signing, preview/download the newest signed PDF.
+    // A 404 means this draft has not yet been signed (or the user cannot access its signed copy).
+    const hasSigned=await requestApi(`/documents/${doc.id}/signatures/verification`,token)
+      .then((result:Record<string,unknown>)=>{
+        const entries=field(result,'ChuKy') as Record<string,unknown>[]|undefined;
+        return Array.isArray(entries)&&entries.length>0;
+      }).catch(()=>false);
+    setMainSigned(hasSigned);
   };
   useEffect(()=>{load().catch(err=>setError((err as Error).message));},[doc.id,doc.version,token]);
   const save=async()=>{
@@ -500,12 +509,14 @@ function DraftAttachmentEditor({doc,actor,token,onUpdated}:{doc:VanBan;actor:Act
     <h3>Tệp đính kèm hiện tại</h3>
     <p className="subtle">Word, Excel và PDF được giữ cùng văn bản. Tên văn bản «{doc.title}» không thể sửa sau khi tạo.</p>
     {([true,false] as const).map(isMain=><div key={String(isMain)}>
-      <h4>{isMain?'Văn bản chính — PDF dùng để ký':'Tệp đính kèm — Word / Excel / PDF'}</h4>
+      <h4>{isMain?'Văn bản chính — một PDF, cập nhật sau mỗi lần ký':'Tệp đính kèm — Word / Excel / PDF'}</h4>
       <div className="attachment-list">
       {attachments.filter(file=>Boolean(field(file,'LaVanBanChinh'))===isMain).map(file=>{const id=String(field(file,'MaTep'));const filename=String(field(file,'TenTep'));
+        const currentPath=isMain&&mainSigned?`/documents/${doc.id}/signed-pdf`:`/documents/${doc.id}/files/${id}`;
         return <div className="attachment-entry" key={id}><FileText size={17}/><span className={removed.includes(id)?'marked-removal':''}>{filename}{Boolean(field(file,'LaVanBanChinh'))?' · Văn bản chính':''}</span>
-          <button className="secondary small" onClick={()=>setPreview({path:`/documents/${doc.id}/files/${id}`,name:filename})}>Xem trước</button>
-          <button className="secondary small" onClick={()=>downloadApi(`/documents/${doc.id}/files/${id}`,token,filename).catch(err=>setError((err as Error).message))}>Tải về</button>
+          {isMain&&mainSigned&&<span className="success-note">Đã cập nhật chữ ký số</span>}
+          <button className="secondary small" onClick={()=>setPreview({path:currentPath,name:filename})}>{isMain?'Xem văn bản chính':'Xem trước'}</button>
+          <button className="secondary small" onClick={()=>downloadApi(currentPath,token,filename).catch(err=>setError((err as Error).message))}>Tải về</button>
           {editable&&<label className="remove-file"><input type="checkbox" checked={removed.includes(id)}
             onChange={e=>setRemoved(old=>e.target.checked?[...old,id]:old.filter(x=>x!==id))}/> Bỏ ở bản mới</label>}
         </div>;})}
