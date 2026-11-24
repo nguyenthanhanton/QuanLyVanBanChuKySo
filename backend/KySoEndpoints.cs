@@ -45,13 +45,13 @@ public static class KySoEndpoints
         if(string.IsNullOrWhiteSpace(request.HinhAnhKyBase64) && !agency)return null;
         byte[]? image=null;
         if(!string.IsNullOrWhiteSpace(request.HinhAnhKyBase64)){
-            if(request.HinhAnhKyBase64.Length>1_400_000)
-                throw new InvalidDataException("Ảnh chữ ký vượt giới hạn 1 MB.");
+            if(request.HinhAnhKyBase64.Length>6_990_508)
+                throw new InvalidDataException("Ảnh chữ ký vượt giới hạn 5 MB.");
             try {image=Convert.FromBase64String(request.HinhAnhKyBase64);}
             catch(FormatException){throw new InvalidDataException("Ảnh chữ ký không phải Base64 hợp lệ.");}
-            if(image.Length>1_048_576 || image.Length<24 ||
+            if(image.Length>5_242_880 || image.Length<24 ||
                !image.AsSpan(0,8).SequenceEqual(new byte[]{137,80,78,71,13,10,26,10}))
-                throw new InvalidDataException("Chỉ hỗ trợ ảnh chữ ký PNG tối đa 1 MB.");
+                throw new InvalidDataException("Chỉ hỗ trợ ảnh chữ ký PNG tối đa 5 MB.");
             var width=System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(image.AsSpan(16,4));
             var height=System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(image.AsSpan(20,4));
             if(width is 0 or >4096 || height is 0 or >4096)

@@ -276,8 +276,8 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
           kind==='agency-sign'?`/documents/${doc.id}/agency-signature`:`/documents/${doc.id}/publications`;
         let imageBase64:string|undefined;
         if(signatureImage&&(kind==='sign'||kind==='draft-sign'||kind==='agency-sign')){
-          if(signatureImage.size>1024*1024||signatureImage.type!=='image/png')
-            throw new Error('Ảnh ký phải là PNG tối đa 1 MB.');
+          if(signatureImage.size>5*1024*1024||signatureImage.type!=='image/png')
+            throw new Error('Ảnh ký phải là PNG tối đa 5 MB.');
           const url=await new Promise<string>((resolve,reject)=>{
             const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));
             reader.onerror=()=>reject(new Error('Không đọc được ảnh chữ ký.'));
@@ -339,7 +339,7 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
     <div className="form-section"><h4>Các bước ký và phát hành</h4>
       {['NHAP','TRA_SUA','CHO_DUYET','DA_CAP_SO'].includes(doc.status)&&<div className="form-section">
         <h4>Xem PDF và kéo thả hình chữ ký trước khi ký</h4>
-        <p className="fine-note">1. Chọn ảnh PNG nền trong suốt tối đa 1 MB. 2. Nhấn “Mở PDF để đặt chữ ký”, kéo ảnh vào vị trí và chỉnh kích thước. 3. Xác nhận vị trí rồi mới nhấn ký số. Không hỗ trợ trang PDF xoay.</p>
+        <p className="fine-note">1. Chọn ảnh PNG nền trong suốt tối đa 5 MB. 2. Nhấn “Mở PDF để đặt chữ ký”, kéo ảnh vào vị trí và chỉnh kích thước. 3. Xác nhận vị trí rồi mới nhấn ký số. Không hỗ trợ trang PDF xoay.</p>
         <label>Ảnh chữ ký / con dấu (PNG)
           <input type="file" accept="image/png,.png" onChange={e=>{setSignatureImage(e.target.files?.[0]);setPlacementConfirmed(false);}}/>
         </label>
