@@ -8,7 +8,6 @@ using iText.Commons.Bouncycastle.Crypto;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas;
 using iText.Kernel.Font;
-using iText.Kernel.Geom;
 using iText.Forms.Form.Element;
 using iText.IO.Image;
 using iText.IO.Font;
@@ -147,7 +146,7 @@ public sealed class DichVuKyPdf(IConfiguration config)
                     if(page.GetRotation()!=0)
                         throw new InvalidDataException("Trang PDF xoay chưa hỗ trợ đặt vùng chữ ký; hãy chuẩn hóa trang trước khi soạn.");
                     var pageSize=page.GetPageSize();
-                    var rect=new Rectangle(pageSize.GetX()+viTri.X*pageSize.GetWidth(),
+                    var rect=new iText.Kernel.Geom.Rectangle(pageSize.GetX()+viTri.X*pageSize.GetWidth(),
                         pageSize.GetY()+(1-viTri.Y-viTri.Cao)*pageSize.GetHeight(),
                         viTri.Rong*pageSize.GetWidth(),viTri.Cao*pageSize.GetHeight());
                     var properties=signer.GetSignerProperties();
