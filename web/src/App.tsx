@@ -595,9 +595,9 @@ function UserAdministration({token,username}:{token:string;username:string}){
           tenDangNhap:login,hoTen:name,matKhau:password,maPhongBan:department,maVaiTro:role})});
         setPassword('');setLogin('');setName('');
       },'Đã tạo tài khoản. Hãy hướng dẫn người dùng đổi mật khẩu sau lần đăng nhập đầu.');}}>
-        <div className="form-grid">
+        <div className="form-grid admin-create-grid">
           <label>Tên đăng nhập<input value={login} onChange={e=>setLogin(e.target.value)} required placeholder="vd: phophong_a"/></label>
-          <label>Họ tên<input value={name} onChange={e=>setName(e.target.value)} required/></label>
+          <label>Họ và tên<input value={name} onChange={e=>setName(e.target.value)} required placeholder="Nhập họ tên người dùng"/></label>
           <label>Mật khẩu ban đầu (ít nhất 12 ký tự)<input type="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={12} required autoComplete="new-password"/></label>
           <label>Phòng ban<select value={department} onChange={e=>setDepartment(Number(e.target.value))}>
             {departments.map(d=><option key={d.MaPhongBan} value={d.MaPhongBan}>{d.TenPhongBan}</option>)}
