@@ -7,7 +7,7 @@ public sealed record TaoChungThuKy(string LoaiChungThu,string TenChungThu,string
 public sealed record ChuanBiPdf(Guid MaYeuCau);
 public sealed record KyVanBan(string LoaiChuKy,string MatKhau,Guid MaYeuCau,
     string? HinhAnhKyBase64=null,int? TrangKy=null,float? TyLeX=null,float? TyLeY=null,
-    float? TyLeRong=null,float? TyLeCao=null);
+    float? TyLeRong=null,float? TyLeCao=null,Guid? MaChungThu=null);
 
 public sealed class HoSoKy {
     public Guid MaVanBan {get;set;}
@@ -30,6 +30,7 @@ public sealed class ChungThuLuu {
     public string MaKhoaMaHoa {get;set;}="";
     public string NguonChungThu {get;set;}="";
     public byte[] ChungThuCongKhai {get;set;}=[];
+    public byte[]? HinhAnhChuKy {get;set;}
 }
 public sealed class BanPdf {
     public Guid MaBan {get;set;}
@@ -43,6 +44,25 @@ public sealed class NguonPdf {
 
 public static class KySoEndpoints
 {
+    private static byte[] DocPng(IFormFile? file)
+    {
+        if(file==null || file.Length is < 24 or > 5_242_880)
+            throw new InvalidDataException("Cần ảnh chữ ký PNG tối đa 5 MB.");
+        using var stream=new MemoryStream();file.CopyTo(stream);var bytes=stream.ToArray();
+        if(!bytes.AsSpan(0,8).SequenceEqual(new byte[]{137,80,78,71,13,10,26,10}))
+            throw new InvalidDataException("Ảnh chữ ký phải là PNG.");
+        var w=System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(16,4));
+        var h=System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(20,4));
+        if(w is 0 or >4096 || h is 0 or >4096)throw new InvalidDataException("Ảnh vượt quá 4096 pixel mỗi chiều.");
+        return bytes;
+    }
+
+    private static DichVuKyPdf.ViTriHienThi ViTriDaDangKy(KyVanBan request,ChungThuLuu cert,string label,bool agency=false)
+    {
+        if(request.MaChungThu!=cert.MaChungThu || cert.HinhAnhChuKy==null)
+            throw new InvalidDataException("Hãy chọn chữ ký đã đăng ký có ảnh PNG trên trang Quản lý chữ ký số.");
+        return ViTriKy(request with{HinhAnhKyBase64=Convert.ToBase64String(cert.HinhAnhChuKy)},label,agency)!;
+    }
     // Cleanup must never replace the actual PDF signing error with an IOException.
     private static void XoaTepTam(string path)
     {
@@ -132,11 +152,68 @@ public static class KySoEndpoints
             using var cn=db.Open();
             var rows=await cn.QueryAsync(@"
                 SELECT MaChungThu,LoaiChungThu,NguonChungThu,TenChungThu,SoSerial,MaNguoiSoHuu,
-                       DangHoatDong,NgayHieuLuc,NgayHetHan
+                       DangHoatDong,NgayHieuLuc,NgayHetHan,TenMauChuKy,
+                       CAST(CASE WHEN HinhAnhChuKy IS NULL THEN 0 ELSE 1 END AS BIT) AS CoAnhChuKy
                 FROM dbo.ChungThuKy WHERE MaCoQuan=@agency
                     AND (MaNguoiSoHuu=@user OR MaNguoiSoHuu IS NULL)
                 ORDER BY ThoiDiemTao DESC",new{agency=user.MaCoQuan,user=user.MaNguoiDung});
             return Results.Ok(rows);
+        }).RequireAuthorization();
+
+        app.MapGet("/api/v1/signing-credentials/{id:guid}/image",async(Guid id,HttpContext http,
+            PhanQuyen permissions,Database db)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor?.MaCoQuan is null)return Results.Unauthorized();
+            using var cn=db.Open();
+            var image=await cn.QuerySingleOrDefaultAsync<byte[]>(@"
+                SELECT HinhAnhChuKy FROM dbo.ChungThuKy WHERE MaChungThu=@id AND MaCoQuan=@agency
+                AND DangHoatDong=1 AND (MaNguoiSoHuu=@user OR
+                  (MaNguoiSoHuu IS NULL AND EXISTS(SELECT 1 FROM dbo.NguoiDungVaiTro uv
+                    JOIN dbo.VaiTro v ON v.MaVaiTro=uv.MaVaiTro
+                    WHERE uv.MaCoQuan=@agency AND uv.MaNguoiDung=@user
+                      AND v.MaDinhDanh IN ('LANH_DAO','VAN_THU'))))",
+                new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung});
+            return image==null?Results.NotFound():Results.File(image,"image/png");
+        }).RequireAuthorization();
+
+        app.MapPost("/api/v1/signing-credentials/{id:guid}/image",async(Guid id,HttpContext http,
+            PhanQuyen permissions,Database db)=>{
+            if(!http.Request.HasFormContentType)return Results.BadRequest(new{message="Cần multipart/form-data."});
+            var form=await http.Request.ReadFormAsync();
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor?.MaCoQuan is null)return Results.Unauthorized();
+            byte[] image;
+            try{image=DocPng(form.Files.GetFile("anhChuKy"));}
+            catch(InvalidDataException ex){return Results.BadRequest(new{message=ex.Message});}
+            using var cn=db.Open();
+            var isLeader=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.NguoiDungVaiTro uv JOIN dbo.VaiTro v ON v.MaVaiTro=uv.MaVaiTro
+                WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency AND v.MaDinhDanh='LANH_DAO'",
+                new{user=actor.MaNguoiDung,agency=actor.MaCoQuan})>0;
+            var count=await cn.ExecuteAsync(@"
+                UPDATE dbo.ChungThuKy SET HinhAnhChuKy=@image,TenMauChuKy=@label
+                WHERE MaChungThu=@id AND MaCoQuan=@agency AND
+                  (MaNguoiSoHuu=@user OR (MaNguoiSoHuu IS NULL AND @isLeader=1))
+                  AND DangHoatDong=1",new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,
+                    isLeader,image,label=form["tenMau"].ToString()[..Math.Min(180,form["tenMau"].ToString().Length)]});
+            return count==0?Results.NotFound():Results.Ok(new{maChungThu=id});
+        }).RequireAuthorization().DisableAntiforgery();
+
+        app.MapPost("/api/v1/signing-credentials/{id:guid}/deactivate",async(Guid id,HttpContext http,
+            PhanQuyen permissions,Database db)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor?.MaCoQuan is null)return Results.Unauthorized();
+            using var cn=db.Open();
+            var isLeader=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.NguoiDungVaiTro uv JOIN dbo.VaiTro v ON v.MaVaiTro=uv.MaVaiTro
+                WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency AND v.MaDinhDanh='LANH_DAO'",
+                new{user=actor.MaNguoiDung,agency=actor.MaCoQuan})>0;
+            var affected=await cn.ExecuteAsync(@"
+                UPDATE dbo.ChungThuKy SET DangHoatDong=0
+                WHERE MaChungThu=@id AND MaCoQuan=@agency AND DangHoatDong=1
+                AND (MaNguoiSoHuu=@user OR (MaNguoiSoHuu IS NULL AND @isLeader=1))",
+                new{id,user=actor.MaNguoiDung,agency=actor.MaCoQuan,isLeader});
+            return affected==0?Results.NotFound():Results.Ok(new{maChungThu=id,daVoHieuHoa=true});
         }).RequireAuthorization();
 
         // Certificate import uses multipart; self-signed mode intentionally marked as TEST ONLY.
@@ -150,6 +227,9 @@ public static class KySoEndpoints
             var name=form["tenChungThu"].ToString().Trim();
             var password=form["matKhau"].ToString();
             var file=form.Files.GetFile("tepPfx");
+            byte[] stamp;
+            try{stamp=DocPng(form.Files.GetFile("anhChuKy"));}
+            catch(InvalidDataException ex){return Results.BadRequest(new{message=ex.Message});}
             if(type is not ("CA_NHAN" or "CO_QUAN") || name.Length is < 3 or > 180)
                 return Results.BadRequest(new{message="Loại hoặc tên chứng thư không hợp lệ."});
             if(!test && (file is null || file.Length is < 100 or > 1_048_576))
@@ -160,6 +240,9 @@ public static class KySoEndpoints
             if(actor!.MaCoQuan is null)return Results.Forbid();
             using var cn=db.Open();await cn.OpenAsync();
             using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
+            if(type=="CO_QUAN" && !await CoVaiTro(cn,tx,actor,"LANH_DAO")){
+                tx.Rollback();return Results.Forbid();
+            }
             if(!await KiemTraMatKhau(cn,tx,actor,password)){
                 tx.Rollback();return Results.BadRequest(new{message="Xác nhận mật khẩu tài khoản không đúng."});
             }
@@ -169,8 +252,16 @@ public static class KySoEndpoints
                 WHERE MaCoQuan=@agency AND LoaiChungThu=@type AND DangHoatDong=1
                   AND ((MaNguoiSoHuu=@owner) OR (MaNguoiSoHuu IS NULL AND @owner IS NULL))",
                 new{agency=actor.MaCoQuan,type,owner},tx);
+            var activeCount=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.ChungThuKy WITH(UPDLOCK,HOLDLOCK)
+                WHERE MaCoQuan=@agency AND LoaiChungThu='CA_NHAN'
+                  AND MaNguoiSoHuu=@owner AND DangHoatDong=1",
+                new{agency=actor.MaCoQuan,owner},tx);
+            if(type=="CA_NHAN" && activeCount>=3 && !replaceTest){
+                tx.Rollback();return Results.Conflict(new{message="Tài khoản đã có 3 chữ ký cá nhân đang hoạt động."});
+            }
             if(replaceTest && !test){tx.Rollback();return Results.BadRequest(new{message="Chỉ được thay thế bằng chứng thư tự ký thử nghiệm."});}
-            if(active!=null && (!replaceTest || active.NguonChungThu!="TU_KY_THU_NGHIEM")){
+            if(type=="CO_QUAN" && active!=null && (!replaceTest || active.NguonChungThu!="TU_KY_THU_NGHIEM")){
                 tx.Rollback();return Results.Conflict(new{message=active.NguonChungThu=="TU_KY_THU_NGHIEM"
                     ?"Đã có chứng thư thử nghiệm đang hoạt động. Chọn 'Thay thế chứng thư thử nghiệm cũ' để tạo mới."
                     :"Chứng thư PFX đang hoạt động không thể thay thế bằng chức năng thử nghiệm."});
@@ -200,12 +291,13 @@ public static class KySoEndpoints
                 }
                 await cn.ExecuteAsync(@"
                     INSERT dbo.ChungThuKy(MaChungThu,MaCoQuan,MaNguoiSoHuu,LoaiChungThu,NguonChungThu,TenChungThu,
-                        SoSerial,ChungThuCongKhai,DuongDanKhoaMaHoa,MaKhoaMaHoa,NgayHieuLuc,NgayHetHan)
-                    VALUES(@certId,@agency,@owner,@type,@source,@name,@serial,@publicCert,@path,@keyId,@start,@end)",
+                        SoSerial,ChungThuCongKhai,DuongDanKhoaMaHoa,MaKhoaMaHoa,NgayHieuLuc,NgayHetHan,TenMauChuKy,HinhAnhChuKy)
+                    VALUES(@certId,@agency,@owner,@type,@source,@name,@serial,@publicCert,@path,@keyId,@start,@end,@label,@stamp)",
                     new{certId,agency=actor.MaCoQuan,owner,type,name,serial=cert.SoSerial,
                         publicCert=cert.ChungThuCongKhai,path=cert.DuongDanKhoaMaHoa,
                         keyId=signer.MaKhoa(),source=test?"TU_KY_THU_NGHIEM":"NHAP_PFX",
-                        start=cert.NgayHieuLuc,end=cert.NgayHetHan},tx);
+                        start=cert.NgayHieuLuc,end=cert.NgayHetHan,
+                        label=form["tenMau"].ToString().Trim(),stamp},tx);
                 await cn.ExecuteAsync(@"
                     INSERT dbo.NhatKyHeThong(MaCoQuan,MaNguoiDung,LoaiNhatKy,HanhDong,MoTa)
                     VALUES(@agency,@user,'NGHIEP_VU',@action,@description)",
@@ -262,11 +354,12 @@ public static class KySoEndpoints
             }
             var cert=await cn.QuerySingleOrDefaultAsync<ChungThuLuu>(@"
                 SELECT TOP 1 MaChungThu,MaCoQuan,MaNguoiSoHuu,DuongDanKhoaMaHoa,MaKhoaMaHoa,
-                    ChungThuCongKhai,NguonChungThu FROM dbo.ChungThuKy
+                    ChungThuCongKhai,NguonChungThu,HinhAnhChuKy FROM dbo.ChungThuKy
                 WHERE MaCoQuan=@agency AND MaNguoiSoHuu=@user AND LoaiChungThu='CA_NHAN'
+                    AND MaChungThu=@selected
                     AND DangHoatDong=1 AND NgayHieuLuc<=SYSUTCDATETIME()
                     AND NgayHetHan>SYSUTCDATETIME() ORDER BY ThoiDiemTao DESC",
-                new{agency=actor.MaCoQuan,user=actor.MaNguoiDung},tx);
+                new{agency=actor.MaCoQuan,user=actor.MaNguoiDung,selected=request.MaChungThu},tx);
             if(cert==null){tx.Rollback();return Results.Conflict(new{message="Người soạn chưa có chứng thư cá nhân đang hoạt động."});}
             if(cert.MaKhoaMaHoa!=signer.MaKhoa()){
                 tx.Rollback();return Results.Conflict(new{message="Không tìm thấy khóa giải mã chứng thư hiện tại."});
@@ -281,7 +374,7 @@ public static class KySoEndpoints
                 var baselineHash=await DichVuKyPdf.Bam(baselinePath);
                 var result=signer.Ky(baselinePath,signedPath,field,cert.MaChungThu,
                     actor.MaCoQuan.Value,actor.MaNguoiDung,cert.DuongDanKhoaMaHoa,"KY_NGUOI_SOAN",
-                    ViTriKy(request,"Nguoi soan"));
+                    ViTriDaDangKy(request,cert,"Nguoi soan"));
                 var checks=signer.XacMinh(signedPath);
                 if(checks.Count!=1 || !checks[0].ToanVenMatMa || !checks[0].BaoPhuToanBoBanHienTai)
                     throw new CryptographicException("PDF người soạn ký không toàn vẹn hoặc chứa chữ ký không mong đợi.");
@@ -452,12 +545,13 @@ public static class KySoEndpoints
             int? owner=actor.MaNguoiDung;
             var cert=await cn.QuerySingleOrDefaultAsync<ChungThuLuu>(@"
                 SELECT TOP 1 MaChungThu,MaCoQuan,MaNguoiSoHuu,DuongDanKhoaMaHoa,MaKhoaMaHoa,
-                    ChungThuCongKhai,NguonChungThu
+                    ChungThuCongKhai,NguonChungThu,HinhAnhChuKy
                 FROM dbo.ChungThuKy WHERE MaCoQuan=@agency AND DangHoatDong=1
+                  AND MaChungThu=@selected
                   AND ((MaNguoiSoHuu=@owner) OR (MaNguoiSoHuu IS NULL AND @owner IS NULL))
                   AND NgayHieuLuc<=SYSUTCDATETIME() AND NgayHetHan>SYSUTCDATETIME()
                   AND LoaiChungThu=@type ORDER BY ThoiDiemTao DESC",
-                new{agency=actor.MaCoQuan,owner,type=owner is null?"CO_QUAN":"CA_NHAN"},tx);
+                new{agency=actor.MaCoQuan,owner,selected=request.MaChungThu,type=owner is null?"CO_QUAN":"CA_NHAN"},tx);
             if(cert==null){tx.Rollback();return Results.Conflict(new{message="Chưa cấu hình chứng thư hợp lệ cho người/cơ quan ký."});}
             if(cert.MaKhoaMaHoa!=signer.MaKhoa()){
                 tx.Rollback();return Results.Conflict(new{message="Khóa mã hóa chứng thư đã luân chuyển; cần bộ giải mã cũ."});
@@ -468,7 +562,7 @@ public static class KySoEndpoints
             try {
                 var signed=signer.Ky(previous.DuongDanLuuTru,path,field,cert.MaChungThu,
                     actor.MaCoQuan.Value,owner,cert.DuongDanKhoaMaHoa,request.LoaiChuKy!,
-                    ViTriKy(request,request.LoaiChuKy switch{
+                    ViTriDaDangKy(request,cert,request.LoaiChuKy switch{
                         "KY_NHAY"=>"Ky nhay","KY_THE_THUC"=>"Kiem tra the thuc",_=>"Lanh dao"}));
                 var verified=signer.XacMinh(path);
                 if(verified.Count!=stage.Order || verified.Any(s=>!s.ToanVenMatMa) ||
@@ -548,11 +642,12 @@ public static class KySoEndpoints
             }
             var cert=await cn.QuerySingleOrDefaultAsync<ChungThuLuu>(@"
                 SELECT TOP 1 MaChungThu,MaCoQuan,MaNguoiSoHuu,DuongDanKhoaMaHoa,MaKhoaMaHoa,
-                    ChungThuCongKhai,NguonChungThu FROM dbo.ChungThuKy
+                    ChungThuCongKhai,NguonChungThu,HinhAnhChuKy FROM dbo.ChungThuKy
                 WHERE MaCoQuan=@agency AND MaNguoiSoHuu IS NULL AND LoaiChungThu='CO_QUAN'
+                    AND MaChungThu=@selected
                     AND DangHoatDong=1 AND NgayHieuLuc<=SYSUTCDATETIME()
                     AND NgayHetHan>SYSUTCDATETIME() ORDER BY ThoiDiemTao DESC",
-                new{agency=actor.MaCoQuan},tx);
+                new{agency=actor.MaCoQuan,selected=request.MaChungThu},tx);
             if(cert==null){tx.Rollback();return Results.Conflict(new{message="Cơ quan chưa có chứng thư số đang hoạt động."});}
             if(cert.MaKhoaMaHoa!=signer.MaKhoa()){
                 tx.Rollback();return Results.Conflict(new{message="Khóa mã hóa chứng thư không đúng bộ khóa hiện tại."});
@@ -562,7 +657,7 @@ public static class KySoEndpoints
             try{
                 var signed=signer.Ky(prior.DuongDanLuuTru,path,field,cert.MaChungThu,
                     actor.MaCoQuan.Value,null,cert.DuongDanKhoaMaHoa,"KY_CO_QUAN",
-                    ViTriKy(request,$"So: {doc.SoPhatHanh}/{doc.KyHieu}",true));
+                    ViTriDaDangKy(request,cert,$"So: {doc.SoPhatHanh}/{doc.KyHieu}",true));
                 var checks=signer.XacMinh(path);
                 if(checks.Count!=agencyOrder || checks.Any(s=>!s.ToanVenMatMa) || !checks[^1].BaoPhuToanBoBanHienTai)
                     throw new CryptographicException("Chuỗi chữ ký PDF không toàn vẹn.");
