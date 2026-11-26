@@ -249,6 +249,24 @@
 .incoming-detail-attachments{padding-top:14px;border-top:1px solid #e5ecf4;display:grid;gap:10px}
 .incoming-detail-side>.primary{margin-top:auto;justify-content:center}
 @media(max-width:760px){.incoming-detail-content{grid-template-columns:minmax(0,1fr);overflow-y:auto}.incoming-detail-section{min-height:350px}.incoming-detail-side{overflow:visible}.incoming-detail-modal{height:min(95vh,1100px)}}
+.account-profile-modal{width:min(680px,100%);max-height:92vh;overflow-y:auto;background:#fff;border-radius:14px;padding:24px;display:grid;gap:18px;box-shadow:0 20px 70px #081c3633}
+.account-profile-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid #e6edf5;padding-bottom:16px}
+.account-profile-heading small{font-size:10px;letter-spacing:.9px;color:#6786ac;font-weight:750}
+.account-profile-heading h2{margin:5px 0 0;color:#1b3d60;font-size:21px}
+.account-profile-section{display:grid;gap:13px;padding-bottom:16px;border-bottom:1px solid #e7edf5}
+.account-profile-section:last-child{border-bottom:0;padding-bottom:0}
+.account-profile-section h3{font-size:14px;display:flex;align-items:center;gap:8px;margin:0;color:#23496d}
+.account-profile-section .subtle{margin:0;font-size:11px;color:#8394a8}
+.account-profile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.account-profile-field{display:grid;gap:5px;min-width:0;font-size:12px;color:#496582}
+.account-profile-readonly{border:1px solid #e5eaf1;background:#f2f5f9;color:#61768d;border-radius:8px;padding:11px 12px;min-height:40px;overflow-wrap:anywhere}
+.account-profile-form{display:grid;gap:12px}
+.account-profile-form label{display:grid;gap:6px;color:#355776;font-size:12px;font-weight:650}
+.account-profile-form input{border:1px solid #ccdbea;background:#fff;border-radius:8px;color:#203b56;padding:11px 12px;width:100%;font:inherit;min-width:0}
+.account-profile-form input:focus{outline:2px solid #a2c8f5;border-color:#5a9de5}
+.account-profile-form button{justify-self:start}
+.account-profile-form small{color:#8091a5;font-size:11px}
+@media(max-width:550px){.account-profile-modal{padding:16px}.account-profile-grid{grid-template-columns:1fr}}
 .incoming-evidence-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-top:12px}
 .incoming-evidence-card,.incoming-evidence-selection{display:flex;flex-direction:column;align-items:flex-start;gap:8px;border:1px solid #dce5f2;border-radius:10px;padding:10px;background:#fff;min-width:0}
 .incoming-evidence-card img{display:block;width:100%;height:150px;object-fit:contain;background:#f4f6fa;border-radius:6px}
