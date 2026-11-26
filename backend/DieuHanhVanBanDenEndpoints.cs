@@ -302,6 +302,37 @@ public static class DieuHanhVanBanDenEndpoints
             return Results.Ok(files);
         });
 
+        // Xem ban PDF phat hanh bat bien cua van ban den, ke ca truoc khi lanh dao giao phong.
+        group.MapGet("/{id:guid}/pdf",async(Guid id,HttpContext http,PhanQuyen permissions,
+            Database db,DichVuKyPdf signer)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor?.MaCoQuan is null)return Results.Unauthorized();
+            using var cn=db.Open();
+            if(!await CoQuyenXemXuLy(cn,actor,id))return Results.NotFound();
+            var pdf=await cn.QueryFirstOrDefaultAsync<TepMinhChungRow>(@"
+                SELECT s.DuongDanLuuTru,s.MaBamSha256
+                FROM dbo.VanBanDen d
+                JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+                JOIN dbo.BanPhatHanh p ON p.MaPhatHanh=l.MaPhatHanh
+                JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
+                JOIN dbo.BanPdfDaKy s ON s.MaVanBan=p.MaVanBan AND s.SoPhienBan=p.SoPhienBan
+                    AND s.ThuTuKy=v.SoBuocKy AND s.MaBamSha256=p.MaBamBanCuoi
+                WHERE d.MaVanBanDen=@id AND d.MaCoQuanNhan=@agency
+                  AND l.MaCoQuanNhan=@agency AND l.TrangThai='DA_TIEP_NHAN'",
+                new{id,agency=actor.MaCoQuan});
+            if(pdf is null)return Results.NotFound(new{message="Văn bản đến chưa có PDF đã phát hành để xem."});
+            if(!File.Exists(pdf.DuongDanLuuTru) ||
+               await DichVuKyPdf.Bam(pdf.DuongDanLuuTru)!=pdf.MaBamSha256)
+                return Results.Conflict(new{message="PDF văn bản đến không còn nguyên vẹn."});
+            try{
+                var signatures=signer.XacMinh(pdf.DuongDanLuuTru);
+                if(signatures.Count==0 || signatures.Any(s=>!s.ToanVenMatMa) ||
+                    !signatures[^1].BaoPhuToanBoBanHienTai)
+                    return Results.Conflict(new{message="PDF không vượt qua kiểm tra toàn vẹn chữ ký."});
+            }catch(Exception){return Results.Conflict(new{message="Không thể kiểm tra chữ ký PDF."});}
+            return Results.File(pdf.DuongDanLuuTru,"application/pdf");
+        });
+
         group.MapPost("/{id:guid}/evidence",async(Guid id,HttpContext http,PhanQuyen permissions,
             Database db,IConfiguration config)=>{
             var actor=await permissions.NguoiHienTai(http);
@@ -405,9 +436,10 @@ public static class DieuHanhVanBanDenEndpoints
         var leader=await CoVaiTro(cn,actor.MaNguoiDung,actor.MaCoQuan!.Value,"LANH_DAO","PHO_LANH_DAO");
         var clerk=await CoVaiTro(cn,actor.MaNguoiDung,actor.MaCoQuan.Value,"VAN_THU");
         return await cn.ExecuteScalarAsync<int>(@"
-            SELECT COUNT(*) FROM dbo.PhanCongVanBanDen p
+            SELECT COUNT(*) FROM dbo.VanBanDen d
+            LEFT JOIN dbo.PhanCongVanBanDen p ON p.MaVanBanDen=d.MaVanBanDen
             JOIN dbo.NguoiDung n ON n.MaNguoiDung=@user
-            WHERE p.MaVanBanDen=@id AND p.MaCoQuan=@agency AND
+            WHERE d.MaVanBanDen=@id AND d.MaCoQuanNhan=@agency AND
                 (@leader=1 OR @clerk=1 OR p.MaPhongChuTri=n.MaPhongBan OR EXISTS(
                    SELECT 1 FROM dbo.PhoiHopVanBanDen h WHERE h.MaVanBanDen=@id AND h.MaPhongBan=n.MaPhongBan))",
             new{id,user=actor.MaNguoiDung,agency=actor.MaCoQuan,leader,clerk})>0;
