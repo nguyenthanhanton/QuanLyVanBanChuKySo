@@ -11,6 +11,14 @@ type People={rooms:{maPhongBan:number;tenPhongBan:string;laPhongChuTri:boolean}[
   employees:Person[];assigned:Assignment[];actorDepartment:number|null;canAssign:boolean;canReport:boolean};
 type Inbox={rows:Row[];departments:Department[];leader:boolean;clerk:boolean};
 const empty:Inbox={rows:[],departments:[],leader:false,clerk:false};
+// Dapper tra ve ten cot PascalCase, con record C# duoc serialize camelCase.
+// Chuan hoa ca hai de maVanBanDen va cac key danh sach luon co gia tri.
+const normalizeKeys=(value:unknown):unknown=>{
+  if(Array.isArray(value))return value.map(normalizeKeys);
+  if(value!==null&&typeof value==='object')return Object.fromEntries(
+    Object.entries(value).map(([key,item])=>[key.charAt(0).toLowerCase()+key.slice(1),normalizeKeys(item)]));
+  return value;
+};
 
 export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;onUpdated:()=>Promise<void>}){
   const [data,setData]=useState<Inbox>(empty);
@@ -29,13 +37,13 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [error,setError]=useState('');
-  const api=async(path:string,body?:object)=>{
+  const api=async(path:string,body?:object):Promise<any>=>{
     const response=await fetch('/api/v1/incoming-work'+path,{method:body?'POST':'GET',
       headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
       body:body?JSON.stringify(body):undefined});
     const content=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(content.message??`Máy chủ trả về ${response.status}`);
-    return content;
+    return normalizeKeys(content) as any;
   };
   const load=async()=>setData(await api(''));
   useEffect(()=>{load().catch(e=>setError(e.message));},[token]);
