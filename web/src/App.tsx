@@ -35,13 +35,15 @@ const navigation: Navigation = [
   ] },
   { group: 'QUẢN TRỊ', items: [
     { id:'quan-tri',label:'Quản trị tài khoản',icon:Settings2,permission:'users.manage' },
+    { id:'co-cau',label:'Cơ cấu phòng ban',icon:Building2,permission:'departments.manage' },
   ] },
 ];
 
 const names: Record<Trang, string> = {
   'tong-quan':'Tổng quan', 'van-ban-di':'Quản lý văn bản đi', 'van-ban-den':'Quản lý văn bản đến',
   'cong-viec':'Việc cần xử lý', 'hanh-trinh':'Hành trình văn bản', 'giao-nhan':'Theo dõi giao nhận',
-  'ho-so':'Hồ sơ lưu trữ', 'bao-cao':'Báo cáo thống kê', 'quan-tri':'Quản trị tài khoản'
+  'ho-so':'Hồ sơ lưu trữ', 'bao-cao':'Báo cáo thống kê', 'quan-tri':'Quản trị tài khoản',
+  'co-cau':'Quản lý cơ cấu phòng ban'
 };
 
 function defaultDocs(): VanBan[] {
@@ -558,7 +560,7 @@ type AdminUser={MaNguoiDung:number;TenDangNhap:string;HoTen:string;TenPhongBan:s
 type AdminOption={MaDinhDanh?:string;TenVaiTro?:string;MaPhongBan?:number;TenPhongBan?:string;ThuTuHienThi?:number};
 type ManagedDepartment={MaPhongBan:number;MaDinhDanh:string;TenPhongBan:string;ThuTuHienThi:number;
   MaPhongBanCha:number|null;DangHoatDong:boolean;SoNguoiDung:number;SoPhongBanCon:number};
-function DepartmentAdministration({token,onChanged}:{token:string;onChanged:()=>Promise<void>}){
+function DepartmentAdministration({token}:{token:string}){
   const [items,setItems]=useState<ManagedDepartment[]>([]);
   const [draft,setDraft]=useState<Record<number,{name:string;order:number;parent:number}>>({});
   const [code,setCode]=useState('');const [name,setName]=useState('');const [order,setOrder]=useState(50);
@@ -578,13 +580,14 @@ function DepartmentAdministration({token,onChanged}:{token:string;onChanged:()=>
   useEffect(()=>{load().catch(e=>setError((e as Error).message));},[token]);
   const act=async(fn:()=>Promise<unknown>,success:string)=>{
     setBusy(true);setError('');setMessage('');
-    try{await fn();await load();await onChanged();setMessage(success);}
+    try{await fn();await load();setMessage(success);}
     catch(e){setError((e as Error).message);}finally{setBusy(false);}
   };
   return <section className="panel admin-departments"><div className="panel-head"><div>
     <h3>Quản lý cơ cấu phòng ban</h3>
     <p>Đặt thứ tự từ cao xuống thấp, chọn phòng trực thuộc; không xóa dữ liệu lịch sử.</p>
     </div><button className="secondary small" disabled={busy} onClick={()=>load().catch(e=>setError((e as Error).message))}><RefreshCw size={15}/> Tải lại</button></div>
+    <h4 className="admin-department-section-title">Thêm phòng ban mới</h4>
     <form className="admin-department-create" onSubmit={e=>{e.preventDefault();act(async()=>{
       await requestApi('/admin/departments',token,{method:'POST',body:JSON.stringify({
         maDinhDanh:code,tenPhongBan:name,thuTuHienThi:order,maPhongBanCha:parent||null})});
@@ -601,13 +604,14 @@ function DepartmentAdministration({token,onChanged}:{token:string;onChanged:()=>
       </select></label>
       <button className="primary small" type="submit" disabled={busy||!code||!name}><Plus size={15}/> Thêm phòng</button>
     </form>
+    <h4 className="admin-department-section-title">Danh sách phòng ban <span>({items.length})</span></h4>
     <div className="admin-department-list">{items.map(d=>{const edit=draft[d.MaPhongBan]??
       {name:d.TenPhongBan,order:d.ThuTuHienThi,parent:d.MaPhongBanCha??0};
       return <div className="admin-department-row" key={d.MaPhongBan}>
         <div className="admin-department-description"><strong>{d.TenPhongBan}</strong>
           <small>{d.MaDinhDanh} · {d.SoNguoiDung} người · {d.SoPhongBanCon} phòng trực thuộc</small>
           <span className={d.DangHoatDong?'success-note':'form-error'}>{d.DangHoatDong?'Đang hoạt động':'Ngừng hoạt động'}</span></div>
-        <label>Tên phòng<input disabled={busy||!d.DangHoatDong} value={edit.name}
+        <div className="admin-department-fields"><label>Tên phòng<input disabled={busy||!d.DangHoatDong} value={edit.name}
           onChange={e=>setDraft(s=>({...s,[d.MaPhongBan]:{...edit,name:e.target.value}}))}/></label>
         <label>Thứ tự<input disabled={busy||!d.DangHoatDong} type="number" min={0} max={9999} value={edit.order}
           onChange={e=>setDraft(s=>({...s,[d.MaPhongBan]:{...edit,order:Number(e.target.value)}}))}/></label>
@@ -615,8 +619,8 @@ function DepartmentAdministration({token,onChanged}:{token:string;onChanged:()=>
           onChange={e=>setDraft(s=>({...s,[d.MaPhongBan]:{...edit,parent:Number(e.target.value)}}))}>
           <option value={0}>Trực thuộc cơ quan</option>
           {items.filter(p=>p.DangHoatDong&&p.MaPhongBan!==d.MaPhongBan).map(p=><option key={p.MaPhongBan} value={p.MaPhongBan}>{p.TenPhongBan}</option>)}
-        </select></label>
-        <div className="admin-user-actions"><button className="secondary small" disabled={busy||!d.DangHoatDong}
+        </select></label></div>
+        <div className="admin-department-actions"><button className="secondary small" disabled={busy||!d.DangHoatDong}
           onClick={()=>act(()=>requestApi(`/admin/departments/${d.MaPhongBan}`,token,{method:'PUT',body:JSON.stringify({
             tenPhongBan:edit.name,thuTuHienThi:edit.order,maPhongBanCha:edit.parent||null})}),'Đã lưu phòng ban.')}>Lưu</button>
           <button className="secondary small" disabled={busy||d.MaDinhDanh==='VAN_THU'||['LANH_DAO','VAN_PHONG'].includes(d.MaDinhDanh)&&d.DangHoatDong}
@@ -685,7 +689,6 @@ function UserAdministration({token,username}:{token:string;username:string}){
     (a.TenPhongBan||'').localeCompare(b.TenPhongBan||'','vi')||
     positionRank(a.MaVaiTro)-positionRank(b.MaVaiTro)||a.HoTen.localeCompare(b.HoTen,'vi'));
   return <div className="user-admin">
-    <DepartmentAdministration token={token} onChanged={load}/>
     <section className="panel admin-create"><h3>Thêm tài khoản vào cơ quan</h3>
       <p className="subtle">Chỉ quản trị viên cơ quan được tạo tài khoản. Mật khẩu không được đưa vào GitHub hay nhật ký.</p>
       <form onSubmit={e=>{e.preventDefault();action(async()=>{
@@ -1245,9 +1248,14 @@ export default function App() {
         ].map(([label,value])=><div className="panel report-item" key={label}><span>{label}</span><strong>{value}</strong><div className="report-bar"/></div>)}</div></>}
 
       {page==='quan-tri'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ CƠ QUAN · 0.6.1</div><h1>Quản trị tài khoản</h1>
-        <p>Tạo và quản lý tài khoản, phòng ban, chức vụ trong phạm vi cơ quan. Quản trị viên không mặc nhiên được xem văn bản nghiệp vụ.</p></div></div>
+        <p>Tạo tài khoản, phân công phòng ban và chức vụ. Quản trị viên không mặc nhiên được xem văn bản nghiệp vụ.</p></div></div>
         {!DEMO?<UserAdministration token={token} username={actor.username}/>:
           <div className="panel">Chức năng quản trị tài khoản chỉ sử dụng khi kết nối API thật.</div>}</>}
+
+      {page==='co-cau'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ CƠ QUAN · 0.6.3</div>
+        <h1>Cơ cấu phòng ban</h1><p>Thêm, sửa, sắp xếp thứ bậc và quản lý các phòng trực thuộc cơ quan.</p></div></div>
+        {!DEMO?<DepartmentAdministration token={token}/>:
+          <div className="panel">Chức năng quản lý cơ cấu phòng ban chỉ sử dụng khi kết nối API thật.</div>}</>}
     </div>
     </main>
     {currentDoc&&<DocumentDetails key={currentDoc.id} doc={currentDoc} onClose={()=>setSelected(null)} onAction={action} allowed={actor}
