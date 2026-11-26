@@ -1090,13 +1090,15 @@ function DocumentDetails({doc,onClose,onAction,allowed,canDecide,taskStep,liveTi
   </div>;
 }
 
-function NewDocument({onClose,onCreate,live,recipients}:{onClose:()=>void,onCreate:(input:{title:string;excerpt:string;to:string[];urgency:VanBan['urgency'];mainFile:File;files:File[]})=>Promise<void>,live:boolean,recipients:{value:string;label:string}[]}) {
+function NewDocument({onClose,onCreate,live,recipients,recipientsLoading,recipientsError,onReloadRecipients}:{onClose:()=>void,onCreate:(input:{title:string;excerpt:string;to:string[];urgency:VanBan['urgency'];mainFile:File;files:File[]})=>Promise<void>,live:boolean,recipients:{value:string;label:string}[],recipientsLoading:boolean,recipientsError:string,onReloadRecipients:()=>void}) {
   const [title,setTitle]=useState('');const [excerpt,setExcerpt]=useState('');
   const [to,setTo]=useState<string[]>([]);const [urgency,setUrgency]=useState<VanBan['urgency']>('THUONG');
   const [mainFile,setMainFile]=useState<File|null>(null);
   const [files,setFiles]=useState<File[]>([]);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
   const submit=async(e:FormEvent)=>{e.preventDefault();setBusy(true);setError('');
-    try{if(to.length===0)throw new Error('Chọn ít nhất một cơ quan nhận.');
+    try{if(recipientsLoading)throw new Error('Đang tải danh sách cơ quan nhận, vui lòng đợi.');
+      if(recipientsError)throw new Error('Không tải được danh sách cơ quan nhận. Hãy nhấn Tải lại trước khi tạo văn bản.');
+      if(to.length===0)throw new Error(recipients.length?'Chọn ít nhất một cơ quan nhận.':'Chưa có cơ quan nhận khả dụng. Hãy liên hệ quản trị viên để kiểm tra cấu hình cơ quan.');
       if(!mainFile)throw new Error('Chọn văn bản chính dạng PDF để ký số.');
       if(!mainFile.name.toLowerCase().endsWith('.pdf'))throw new Error('Văn bản chính phải là PDF.');
       await onCreate({title,excerpt,to,urgency,mainFile,files});onClose();}catch(err){setError((err as Error).message);}finally{setBusy(false);}};
@@ -1107,7 +1109,9 @@ function NewDocument({onClose,onCreate,live,recipients}:{onClose:()=>void,onCrea
       <div className="modal-grid"><div><label>Cơ quan nhận dự kiến (có thể chọn nhiều)</label><div className="recipient-picks">
         {recipients.map(r=><label key={r.value}><input type="checkbox" checked={to.includes(r.value)}
           onChange={e=>setTo(prev=>e.target.checked?[...prev,r.value]:prev.filter(x=>x!==r.value))}/>{r.label}</label>)}
-        {recipients.length===0&&<span className="subtle">Chưa có cơ quan nhận được cấu hình.</span>}
+        {recipientsLoading&&<span className="subtle">Đang tải cơ quan nhận...</span>}
+        {!recipientsLoading&&recipientsError&&<span className="form-error">{recipientsError}</span>}
+        {!recipientsLoading&&!recipientsError&&recipients.length===0&&<span className="subtle">Chưa có cơ quan nhận khả dụng.</span>}
         </div></div>
         <div><label>Độ khẩn</label><select value={urgency} onChange={e=>setUrgency(e.target.value as VanBan['urgency'])}><option value="THUONG">Thường</option><option value="KHAN">Khẩn</option><option value="HOA_TOC">Hỏa tốc</option></select></div></div>
       <div className="upload-part"><label>1. Văn bản chính — PDF dùng để ký <span>*</span></label>
@@ -1117,6 +1121,7 @@ function NewDocument({onClose,onCreate,live,recipients}:{onClose:()=>void,onCrea
         <label className="file-upload"><CloudUpload size={22}/><span>{files.length?`${files.length} tệp: ${files.map(f=>f.name).join(', ')}`:'Chọn các tệp đi kèm văn bản chính'}</span><small>Tối đa 20 tệp tính cả PDF chính; 25 MB/tệp</small>
           <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx" onChange={e=>setFiles(Array.from(e.target.files??[]))}/></label></div>
       <p className="fine-note">Trong lúc soạn có thể thay PDF chính hoặc thêm/bỏ tệp đính kèm. Tiêu đề đã tạo không được đổi.</p>
+      {!recipientsLoading&&(recipientsError||recipients.length===0)&&<button type="button" className="secondary" onClick={onReloadRecipients}>Tải lại cơ quan nhận</button>}
       {error&&<div className="form-error">{error}</div>}
     </div><div className="modal-footer"><button type="button" className="secondary" onClick={onClose}>Hủy</button><button className="primary" disabled={busy}>{busy?'Đang lưu...':'Tạo bản dự thảo'}<ArrowRight size={17}/></button></div>
   </form></div>;
@@ -1182,7 +1187,26 @@ export default function App() {
     return()=>{active=false;};
   },[token,page]);
   const [agencyOptions,setAgencyOptions]=useState<{value:string;label:string}[]>(DEMO?[{value:'Cơ quan B',label:'Cơ quan B'},{value:'Cơ quan C',label:'Cơ quan C'}]:[]);
+  const [recipientsLoading,setRecipientsLoading]=useState(false);
+  const [recipientsError,setRecipientsError]=useState('');
+  const [recipientsReload,setRecipientsReload]=useState(0);
   const [error,setError]=useState('');
+
+  useEffect(()=>{
+    if(DEMO||!token||restoring)return;
+    let active=true;
+    setRecipientsLoading(true);setRecipientsError('');
+    requestApi('/agencies/recipients',token)
+      .then(result=>{
+        if(!active)return;
+        const agencies=result as Record<string,unknown>[];
+        if(!Array.isArray(agencies))throw new Error('Dữ liệu cơ quan nhận không hợp lệ.');
+        setAgencyOptions(agencies.map(a=>({value:String(field(a,'MaCoQuan')),label:String(field(a,'TenCoQuan'))})));
+      })
+      .catch(err=>{if(active){setAgencyOptions([]);setRecipientsError(`Không tải được cơ quan nhận: ${(err as Error).message}`);}})
+      .finally(()=>{if(active)setRecipientsLoading(false);});
+    return()=>{active=false;};
+  },[token,restoring,createOpen,recipientsReload]);
 
   useEffect(()=>{
     if(DEMO||!storedSession?.token){setRestoring(false);return;}
@@ -1374,10 +1398,6 @@ export default function App() {
     }catch{/* Thông tin cơ bản vẫn lấy từ phiên đăng nhập. */}
     const start=navigation.flatMap(g=>g.items).find(i=>caps.includes(i.permission));
     setPage(start?.id??'quan-tri');
-    try{
-      const agencies=await requestApi('/agencies/recipients',body.accessToken) as Record<string,unknown>[];
-      setAgencyOptions(agencies.map(a=>({value:String(field(a,'MaCoQuan')),label:String(field(a,'TenCoQuan'))})));
-    }catch{setAgencyOptions([]);}
     if(caps.includes('documents.read'))await refresh(body.accessToken,caps);
   };
 
@@ -1710,7 +1730,7 @@ export default function App() {
       canDecide={DEMO?currentDoc.assignee===actor.name:workqueue.some(t=>String(field(t,'MaVanBan'))===currentDoc.id)}
       taskStep={String(field(workqueue.find(t=>String(field(t,'MaVanBan'))===currentDoc.id)??{},'Buoc')??'')}
       liveTimeline={remoteTimeline} token={token} onUpdated={updateAfterOperation}/>}
-    {createOpen&&<NewDocument onClose={()=>setCreateOpen(false)} onCreate={create} live={!DEMO} recipients={agencyOptions}/>}
+    {createOpen&&<NewDocument onClose={()=>setCreateOpen(false)} onCreate={create} live={!DEMO} recipients={agencyOptions} recipientsLoading={recipientsLoading} recipientsError={recipientsError} onReloadRecipients={()=>setRecipientsReload(v=>v+1)}/>}
     {notice&&<div className="toast"><CheckCircle2 size={18}/>{notice}<button aria-label="Đóng thông báo" onClick={()=>setNotice('')}><X size={15}/></button></div>}
   </div>;
 }
