@@ -153,7 +153,7 @@ public static class HoSoEndpoints
             using var cn=db.Open();await cn.OpenAsync();using var tx=cn.BeginTransaction();
             var allowed=await cn.ExecuteScalarAsync<int>(@"SELECT COUNT(*) FROM dbo.HoSoLuuTru h WITH (UPDLOCK,HOLDLOCK)
                 WHERE h.MaHoSo=@id AND h.MaCoQuan=@agency AND h.DaDong=0 AND "+DuocSua,
-                new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,admin},tx);
+                new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung,admin},tx);
             if(allowed!=1)return Results.Conflict(new{message="Hồ sơ đã đóng hoặc không thuộc quyền chỉnh sửa."});
             var published=await cn.ExecuteScalarAsync<int>(@"SELECT COUNT(*) FROM dbo.VanBan
                 WHERE MaVanBan=@MaVanBan AND MaCoQuan=@agency AND DoMat='THUONG'
@@ -178,7 +178,7 @@ public static class HoSoEndpoints
             using var cn=db.Open();await cn.OpenAsync();using var tx=cn.BeginTransaction();
             var allowed=await cn.ExecuteScalarAsync<int>(@"SELECT COUNT(*) FROM dbo.HoSoLuuTru h WITH(UPDLOCK,HOLDLOCK)
                 WHERE h.MaHoSo=@id AND h.MaCoQuan=@agency AND h.DaDong=0 AND "+DuocSua,
-                new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,admin},tx);
+                new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung,admin},tx);
             if(allowed!=1)return Results.Conflict(new{message="Hồ sơ đã đóng hoặc không thuộc quyền chỉnh sửa."});
             var count=await cn.ExecuteAsync(@"DELETE FROM dbo.HoSoLuuTruVanBan
                 WHERE MaHoSo=@id AND MaCoQuan=@agency AND MaVanBan=@documentId",
