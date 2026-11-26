@@ -12,6 +12,7 @@ public sealed class TepMinhChungRow
     public string TenTep {get;set;}="";
     public string MaBamSha256 {get;set;}="";
 }
+public sealed class VanBanDenSoRow {public int Nam {get;set;} public int? SoDen {get;set;}}
 
 public static class DieuHanhVanBanDenEndpoints
 {
@@ -66,9 +67,47 @@ public static class DieuHanhVanBanDenEndpoints
             if(!await CoVaiTro(cn,actor.MaNguoiDung,actor.MaCoQuan.Value,"VAN_THU"))return Results.Forbid();
             var changed=await cn.ExecuteAsync(@"
                 UPDATE dbo.VanBanDen SET TrangThai='CHO_LANH_DAO'
-                WHERE MaVanBanDen=@id AND MaCoQuanNhan=@agency AND TrangThai='CHO_DANG_KY'",
+                WHERE MaVanBanDen=@id AND MaCoQuanNhan=@agency AND TrangThai='CHO_DANG_KY'
+                  AND SoDen IS NOT NULL",
                 new{id,agency=actor.MaCoQuan});
-            return changed==1?Results.Ok(new{message="Đã trình lãnh đạo"}):Results.Conflict(new{message="Văn bản không ở trạng thái chờ trình hoặc không thuộc cơ quan."});
+            return changed==1?Results.Ok(new{message="Đã trình lãnh đạo"}):Results.Conflict(new{message="Phải cấp số đến trước khi trình lãnh đạo (hoặc văn bản đã được trình)."});
+        });
+
+        group.MapPost("/{id:guid}/register",async(Guid id,HttpContext http,PhanQuyen permissions,Database db)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor?.MaCoQuan is null)return Results.Unauthorized();
+            using var cn=db.Open();await cn.OpenAsync();
+            if(!await CoVaiTro(cn,actor.MaNguoiDung,actor.MaCoQuan.Value,"VAN_THU"))return Results.Forbid();
+            using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
+            var row=await cn.QuerySingleOrDefaultAsync<VanBanDenSoRow>(@"
+                SELECT Nam,SoDen FROM dbo.VanBanDen WITH(UPDLOCK,HOLDLOCK)
+                WHERE MaVanBanDen=@id AND MaCoQuanNhan=@agency",
+                new{id,agency=actor.MaCoQuan},tx);
+            if(row is null){tx.Rollback();return Results.NotFound();}
+            if(row.SoDen is not null){tx.Commit();return Results.Ok(new{soDen=row.SoDen,nam=row.Nam,message="Văn bản đã có số đến."});}
+            await cn.ExecuteAsync(@"
+                IF NOT EXISTS(SELECT 1 FROM dbo.SoVanBan WITH(UPDLOCK,HOLDLOCK)
+                    WHERE MaCoQuan=@agency AND Nam=@year AND LoaiSo='DEN')
+                    INSERT dbo.SoVanBan(MaCoQuan,Nam,LoaiSo,TenSo,SoDaCap)
+                    VALUES(@agency,@year,'DEN',N'Sổ văn bản đến',0)",
+                new{agency=actor.MaCoQuan,year=row.Nam},tx);
+            await cn.ExecuteAsync(@"
+                UPDATE s SET SoDaCap=CASE WHEN SoDaCap<m.SoLonNhat THEN m.SoLonNhat ELSE SoDaCap END
+                FROM dbo.SoVanBan s CROSS APPLY (
+                    SELECT ISNULL(MAX(SoDen),0) AS SoLonNhat FROM dbo.VanBanDen
+                    WHERE MaCoQuanNhan=@agency AND Nam=@year) m
+                WHERE s.MaCoQuan=@agency AND s.Nam=@year AND s.LoaiSo='DEN'",
+                new{agency=actor.MaCoQuan,year=row.Nam},tx);
+            var number=await cn.ExecuteScalarAsync<int>(@"
+                UPDATE dbo.SoVanBan WITH(UPDLOCK) SET SoDaCap=SoDaCap+1
+                OUTPUT INSERTED.SoDaCap
+                WHERE MaCoQuan=@agency AND Nam=@year AND LoaiSo='DEN'",
+                new{agency=actor.MaCoQuan,year=row.Nam},tx);
+            await cn.ExecuteAsync(@"
+                UPDATE dbo.VanBanDen SET SoDen=@number
+                WHERE MaVanBanDen=@id AND MaCoQuanNhan=@agency AND SoDen IS NULL",
+                new{id,agency=actor.MaCoQuan,number},tx);
+            tx.Commit();return Results.Ok(new{soDen=number,nam=row.Nam,message=$"Đã đăng ký số đến {number}/{row.Nam}."});
         });
 
         group.MapPost("/{id:guid}/assign",async(Guid id,GiaoXuLyVanBanDen body,HttpContext http,
@@ -421,10 +460,12 @@ public static class DieuHanhVanBanDenEndpoints
                     MaNguoiKetThuc=@user,ThoiDiemKetThuc=SYSUTCDATETIME()
                 FROM dbo.PhanCongVanBanDen p
                 WHERE p.MaVanBanDen=@id AND p.MaCoQuan=@agency AND p.TrangThai='DANG_XU_LY'
+                  AND EXISTS(SELECT 1 FROM dbo.VanBanDen d
+                             WHERE d.MaVanBanDen=p.MaVanBanDen AND d.SoDen IS NOT NULL)
                   AND EXISTS(SELECT 1 FROM dbo.KetQuaPhongVanBanDen k
                              WHERE k.MaVanBanDen=p.MaVanBanDen AND k.MaPhongBan=p.MaPhongChuTri)",
                 new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,content=body.KetQuaTongHop.Trim()},tx);
-            if(done==0){tx.Rollback();return Results.Conflict(new{message="Phòng chủ trì chưa báo cáo hoặc văn bản đã kết thúc."});}
+            if(done==0){tx.Rollback();return Results.Conflict(new{message="Chưa cấp số đến, phòng chủ trì chưa báo cáo hoặc văn bản đã kết thúc."});}
             await cn.ExecuteAsync(@"UPDATE dbo.VanBanDen SET TrangThai='HOAN_THANH'
                 WHERE MaVanBanDen=@id AND MaCoQuanNhan=@agency",new{id,agency=actor.MaCoQuan},tx);
             tx.Commit();return Results.Ok(new{message="Đã kết thúc xử lý văn bản đến."});
