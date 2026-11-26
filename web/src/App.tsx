@@ -563,14 +563,23 @@ type SigningDelegationTask={MaTacVu:string;MaVanBan:string;Buoc:string;TieuDe:st
   NguoiDuocGiao:string;MaNguoiDuocGiao:number;MaNguoiDuocUyQuyen:number|null;
   HieuLucDen:string|null;DaThuHoi:boolean};
 type SigningCandidate={MaNguoiDung:number;HoTen:string};
+type SigningDelegationHistory={MaTacVu:string;MaNoiBo:string;TieuDe:string;Buoc:string;
+  NguoiGoc:string;NguoiDuocUyQuyen:string;NguoiCap:string;LyDo:string;
+  HieuLucTu:string;HieuLucDen:string;ThoiDiemThuHoi:string|null;ThoiDiemKy:string|null;
+  TrangThaiUyQuyen:string};
 function SigningDelegationAdministration({token}:{token:string}){
   const [tasks,setTasks]=useState<SigningDelegationTask[]>([]);
   const [task,setTask]=useState('');const [candidates,setCandidates]=useState<SigningCandidate[]>([]);
   const [delegateId,setDelegateId]=useState(0);const [hours,setHours]=useState(48);
   const [reason,setReason]=useState('');const [busy,setBusy]=useState(false);
+  const [history,setHistory]=useState<SigningDelegationHistory[]>([]);
+  const [historyFilter,setHistoryFilter]=useState('ALL');
   const [error,setError]=useState('');const [message,setMessage]=useState('');
   const load=async()=>{
-    const raw=await requestApi('/admin/signing-delegations/tasks',token) as Record<string,unknown>[];
+    const [raw,historyRaw]=await Promise.all([
+      requestApi('/admin/signing-delegations/tasks',token),
+      requestApi('/admin/signing-delegations/history',token)
+    ]) as [Record<string,unknown>[],Record<string,unknown>[]];
     const rows=raw.map(x=>({MaTacVu:String(field(x,'MaTacVu')),MaVanBan:String(field(x,'MaVanBan')),
       Buoc:String(field(x,'Buoc')),TieuDe:String(field(x,'TieuDe')),
       NguoiDuocGiao:String(field(x,'NguoiDuocGiao')),MaNguoiDuocGiao:Number(field(x,'MaNguoiDuocGiao')),
@@ -578,6 +587,16 @@ function SigningDelegationAdministration({token}:{token:string}){
       HieuLucDen:field(x,'HieuLucDen')==null?null:String(field(x,'HieuLucDen')),
       DaThuHoi:Boolean(field(x,'DaThuHoi'))}));
     setTasks(rows);setTask(current=>rows.some(t=>t.MaTacVu===current)?current:rows[0]?.MaTacVu??'');
+    setHistory(historyRaw.map(x=>({
+      MaTacVu:String(field(x,'MaTacVu')),MaNoiBo:String(field(x,'MaNoiBo')),
+      TieuDe:String(field(x,'TieuDe')),Buoc:String(field(x,'Buoc')),
+      NguoiGoc:String(field(x,'NguoiGoc')),NguoiDuocUyQuyen:String(field(x,'NguoiDuocUyQuyen')),
+      NguoiCap:String(field(x,'NguoiCap')),LyDo:String(field(x,'LyDo')),
+      HieuLucTu:String(field(x,'HieuLucTu')),HieuLucDen:String(field(x,'HieuLucDen')),
+      ThoiDiemThuHoi:field(x,'ThoiDiemThuHoi')==null?null:String(field(x,'ThoiDiemThuHoi')),
+      ThoiDiemKy:field(x,'ThoiDiemKy')==null?null:String(field(x,'ThoiDiemKy')),
+      TrangThaiUyQuyen:String(field(x,'TrangThaiUyQuyen'))
+    })));
   };
   useEffect(()=>{load().catch(e=>setError((e as Error).message));},[token]);
   useEffect(()=>{
@@ -629,6 +648,26 @@ function SigningDelegationAdministration({token}:{token:string}){
           onClick={()=>submit('grant')}><ShieldCheck size={15}/> Cấp ủy quyền</button>
       </>}
       {current&&current.MaNguoiDuocUyQuyen!=null&&!current.DaThuHoi&&<button className="secondary small" disabled={busy} onClick={()=>submit('revoke')}>Thu hồi ủy quyền</button>}
+    </div>
+    <div className="admin-delegation-history">
+      <div className="panel-head"><div><h3>Lịch sử ủy quyền ký thay</h3>
+        <p>Lưu người giao, người ký thay, thời hạn và lý do; bao gồm cả tác vụ đã hoàn thành.</p></div>
+        <label>Trạng thái <select value={historyFilter} onChange={e=>setHistoryFilter(e.target.value)}>
+          <option value="ALL">Tất cả</option><option value="DANG_HIEU_LUC">Đang hiệu lực</option>
+          <option value="DA_KY">Đã ký thay</option><option value="HET_HAN">Hết hạn</option>
+          <option value="DA_THU_HOI">Đã thu hồi</option><option value="DA_KET_THUC">Tác vụ kết thúc</option>
+        </select></label></div>
+      {history.filter(h=>historyFilter==='ALL'||h.TrangThaiUyQuyen===historyFilter).map(h=><div className="admin-delegation-history-row" key={h.MaTacVu}>
+        <div className="admin-delegation-history-head"><strong>{h.TieuDe} · {h.MaNoiBo}</strong>
+          <span>{({'DANG_HIEU_LUC':'Đang hiệu lực','DA_KY':'Đã ký thay','HET_HAN':'Hết hạn',
+            'DA_THU_HOI':'Đã thu hồi','DA_KET_THUC':'Tác vụ đã kết thúc'} as Record<string,string>)[h.TrangThaiUyQuyen]??h.TrangThaiUyQuyen}</span></div>
+        <p>{h.Buoc==='KIEM_TRA_NOI_DUNG'?'Ký nháy':'Ký lãnh đạo'}: <strong>{h.NguoiGoc}</strong> ủy quyền cho <strong>{h.NguoiDuocUyQuyen}</strong></p>
+        <p>Người cấp: {h.NguoiCap} · Từ {formatDate(h.HieuLucTu)} đến {formatDate(h.HieuLucDen)}</p>
+        <p>Lý do: {h.LyDo}</p>
+        {h.ThoiDiemKy&&<p>Thực tế ký: {formatDate(h.ThoiDiemKy)}</p>}
+        {h.ThoiDiemThuHoi&&<p>Thu hồi: {formatDate(h.ThoiDiemThuHoi)}</p>}
+      </div>)}
+      {history.length===0&&<p className="fine-note">Chưa có lịch sử ủy quyền trong cơ quan.</p>}
     </div>
     {error&&<div className="form-error">{error}</div>}{message&&<p className="success-note">{message}</p>}
   </section>;
