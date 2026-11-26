@@ -124,7 +124,7 @@ public static class QuyTrinhEndpoints
                             AND s.MaNguoiKy=@user AND s.ThoiDiemKy>=q.HieuLucTu
                             AND s.ThoiDiemKy<=q.HieuLucDen
                             AND ((t.Buoc='KIEM_TRA_NOI_DUNG' AND s.LoaiChuKy='KY_NHAY')
-                              OR (t.Buoc='PHE_DUYET_LANH_DAO' AND s.LoaiChuKy='KY_LANH_DAO')))))
+                              OR (t.Buoc='PHE_DUYET_LANH_DAO' AND s.LoaiChuKy='KY_LANH_DAO'))))))
                 ORDER BY t.HanXuLy,t.ThoiDiemTao",
                 new{agency=actor!.MaCoQuan,user=actor.MaNguoiDung});
             return Results.Ok(jobs);
