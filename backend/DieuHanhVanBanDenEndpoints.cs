@@ -1,9 +1,17 @@
 using Dapper;
+using System.Security.Cryptography;
 
 public sealed record GiaoXuLyVanBanDen(int MaPhongChuTri,int[] MaPhongPhoiHop,string? ChiDao,DateTime? HanXuLy);
 public sealed record BaoCaoVanBanDen(string NoiDung);
 public sealed record KetThucVanBanDen(string KetQuaTongHop);
-public sealed record GiaoCaNhanVanBanDen(int MaPhongBan,int MaNguoiChuTri,int[] MaNguoiPhoiHop,string? GhiChu);
+public sealed record GiaoCaNhanVanBanDen(int MaPhongBan,int MaNguoiChuTri,int[] MaNguoiPhoiHop,string? GhiChu,string? LyDoGiaoLai);
+public sealed class TepMinhChungRow
+{
+    public string DuongDanLuuTru {get;set;}="";
+    public string LoaiNoiDung {get;set;}="";
+    public string TenTep {get;set;}="";
+    public string MaBamSha256 {get;set;}="";
+}
 
 public static class DieuHanhVanBanDenEndpoints
 {
@@ -130,7 +138,7 @@ public static class DieuHanhVanBanDenEndpoints
                 WHERE p.MaVanBanDen=@id AND p.MaCoQuan=@agency",
                 new{id,agency=actor.MaCoQuan});
             var employees=await cn.QueryAsync(@"
-                SELECT n.MaNguoiDung,n.MaPhongBan,n.HoTen
+                SELECT n.MaNguoiDung,n.MaPhongBan,n.HoTen,n.ChucVu AS TenChucVu
                 FROM dbo.NguoiDung n
                 WHERE n.MaCoQuan=@agency AND n.DangHoatDong=1
                   AND (EXISTS(SELECT 1 FROM dbo.PhanCongVanBanDen p
@@ -142,21 +150,30 @@ public static class DieuHanhVanBanDenEndpoints
                 ORDER BY n.HoTen",
                 new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,leader,manager});
             var assigned=await cn.QueryAsync(@"
-                SELECT a.MaPhongBan,a.MaNguoiChuTri,n.HoTen AS TenNguoiChuTri,a.GhiChu,
-                  (SELECT STRING_AGG(helper.HoTen,N', ') FROM dbo.NguoiPhoiHopVanBanDen x
+                SELECT a.MaPhongBan,a.MaNguoiChuTri,n.HoTen AS TenNguoiChuTri,n.ChucVu AS ChucVuChuTri,a.GhiChu,
+                  (SELECT STRING_AGG(CONCAT(helper.HoTen,CASE WHEN NULLIF(helper.ChucVu,N'') IS NULL
+                       THEN N'' ELSE CONCAT(N' (',helper.ChucVu,N')') END),N', ') FROM dbo.NguoiPhoiHopVanBanDen x
                    JOIN dbo.NguoiDung helper ON helper.MaNguoiDung=x.MaNguoiDung
                    WHERE x.MaVanBanDen=a.MaVanBanDen AND x.MaPhongBan=a.MaPhongBan) AS TenNguoiPhoiHop
                 FROM dbo.PhanCongCaNhanVanBanDen a JOIN dbo.NguoiDung n ON n.MaNguoiDung=a.MaNguoiChuTri
                 WHERE a.MaVanBanDen=@id",new{id});
             var actorDepartment=await cn.ExecuteScalarAsync<int?>(@"SELECT MaPhongBan FROM dbo.NguoiDung WHERE MaNguoiDung=@user",
                 new{user=actor.MaNguoiDung});
+            var changes=await cn.QueryAsync(@"
+                SELECT l.MaLichSu,l.MaPhongBan,oldUser.HoTen AS NguoiCu,newUser.HoTen AS NguoiMoi,
+                    editor.HoTen AS NguoiDieuChinh,l.LyDo,l.ThoiDiem
+                FROM dbo.LichSuGiaoLaiCaNhanVanBanDen l
+                JOIN dbo.NguoiDung oldUser ON oldUser.MaNguoiDung=l.MaNguoiChuTriCu
+                JOIN dbo.NguoiDung newUser ON newUser.MaNguoiDung=l.MaNguoiChuTriMoi
+                JOIN dbo.NguoiDung editor ON editor.MaNguoiDung=l.MaNguoiThayDoi
+                WHERE l.MaVanBanDen=@id ORDER BY l.ThoiDiem DESC",new{id});
             var canReport=await cn.ExecuteScalarAsync<int>(@"
                 SELECT COUNT(*) FROM dbo.PhanCongCaNhanVanBanDen a
                 JOIN dbo.PhanCongVanBanDen p ON p.MaVanBanDen=a.MaVanBanDen
                 WHERE a.MaVanBanDen=@id AND a.MaNguoiChuTri=@user AND p.MaCoQuan=@agency
                   AND p.TrangThai='DANG_XU_LY'",
                 new{id,user=actor.MaNguoiDung,agency=actor.MaCoQuan})>0;
-            return Results.Ok(new{rooms,employees,assigned,actorDepartment,canAssign=manager,canReport});
+            return Results.Ok(new{rooms,employees,assigned,changes,actorDepartment,canAssign=manager,canReport});
         });
 
         group.MapPost("/{id:guid}/people",async(Guid id,GiaoCaNhanVanBanDen body,HttpContext http,
@@ -165,7 +182,8 @@ public static class DieuHanhVanBanDenEndpoints
             if(actor?.MaCoQuan is null)return Results.Unauthorized();
             if(body.MaPhongBan<=0 || body.MaNguoiChuTri<=0 || body.MaNguoiPhoiHop is null ||
                body.MaNguoiPhoiHop.Length>50 || body.MaNguoiPhoiHop.Contains(body.MaNguoiChuTri) ||
-               body.MaNguoiPhoiHop.Distinct().Count()!=body.MaNguoiPhoiHop.Length || body.GhiChu?.Length>2000)
+               body.MaNguoiPhoiHop.Distinct().Count()!=body.MaNguoiPhoiHop.Length || body.GhiChu?.Length>2000 ||
+               body.LyDoGiaoLai?.Length>1000)
                 return Results.BadRequest(new{message="Cá nhân chủ trì hoặc phối hợp không hợp lệ."});
             using var cn=db.Open();await cn.OpenAsync();
             if(!await CoVaiTro(cn,actor.MaNguoiDung,actor.MaCoQuan.Value,"TRUONG_PHONG","PHO_PHONG"))return Results.Forbid();
@@ -184,6 +202,13 @@ public static class DieuHanhVanBanDenEndpoints
                 WHERE MaVanBanDen=@id AND MaPhongBan=@room",
                 new{id,room=body.MaPhongBan},tx);
             if(hasReport>0){tx.Rollback();return Results.Conflict(new{message="Phòng đã báo cáo; không thể đổi người chịu trách nhiệm."});}
+            var previous=await cn.ExecuteScalarAsync<int?>(@"
+                SELECT MaNguoiChuTri FROM dbo.PhanCongCaNhanVanBanDen WITH(UPDLOCK,HOLDLOCK)
+                WHERE MaVanBanDen=@id AND MaPhongBan=@room",
+                new{id,room=body.MaPhongBan},tx);
+            if(previous is not null && string.IsNullOrWhiteSpace(body.LyDoGiaoLai)){
+                tx.Rollback();return Results.Conflict(new{message="Muốn giao lại phải ghi rõ lý do điều chỉnh phân công."});
+            }
             var ids=body.MaNguoiPhoiHop.Append(body.MaNguoiChuTri).ToArray();
             var valid=await cn.ExecuteScalarAsync<int>(@"
                 SELECT COUNT(*) FROM dbo.NguoiDung
@@ -204,6 +229,13 @@ public static class DieuHanhVanBanDenEndpoints
                 await cn.ExecuteAsync(@"
                     INSERT dbo.NguoiPhoiHopVanBanDen(MaVanBanDen,MaPhongBan,MaNguoiDung)
                     VALUES(@id,@room,@helper)",new{id,room=body.MaPhongBan,helper},tx);
+            if(previous is not null)
+                await cn.ExecuteAsync(@"
+                    INSERT dbo.LichSuGiaoLaiCaNhanVanBanDen
+                        (MaVanBanDen,MaPhongBan,MaNguoiChuTriCu,MaNguoiChuTriMoi,MaNguoiThayDoi,LyDo)
+                    VALUES(@id,@room,@previous,@principal,@user,@reason)",
+                    new{id,room=body.MaPhongBan,previous,principal=body.MaNguoiChuTri,
+                        user=actor.MaNguoiDung,reason=body.LyDoGiaoLai!.Trim()},tx);
             tx.Commit();return Results.Ok(new{message="Đã giao cá nhân chịu trách nhiệm thực hiện."});
         });
 
@@ -256,6 +288,94 @@ public static class DieuHanhVanBanDenEndpoints
             return Results.Ok(reports);
         });
 
+        group.MapGet("/{id:guid}/evidence",async(Guid id,HttpContext http,PhanQuyen permissions,Database db)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor?.MaCoQuan is null)return Results.Unauthorized();
+            using var cn=db.Open();
+            if(!await CoQuyenXemXuLy(cn,actor,id))return Results.NotFound();
+            var files=await cn.QueryAsync(@"
+                SELECT m.MaMinhChung,m.MaPhongBan,m.TenTep,m.LoaiNoiDung,m.KichThuoc,
+                    m.ThoiDiemTaiLen,n.HoTen AS NguoiTaiLen
+                FROM dbo.MinhChungBaoCaoVanBanDen m
+                JOIN dbo.NguoiDung n ON n.MaNguoiDung=m.MaNguoiTaiLen
+                WHERE m.MaVanBanDen=@id ORDER BY m.ThoiDiemTaiLen",new{id});
+            return Results.Ok(files);
+        });
+
+        group.MapPost("/{id:guid}/evidence",async(Guid id,HttpContext http,PhanQuyen permissions,
+            Database db,IConfiguration config)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor?.MaCoQuan is null)return Results.Unauthorized();
+            if(!http.Request.HasFormContentType)return Results.BadRequest(new{message="Cần gửi multipart/form-data."});
+            var form=await http.Request.ReadFormAsync();
+            var file=form.Files.GetFile("tepMinhChung");
+            if(file is null || file.Length<1 || file.Length>5*1024*1024)
+                return Results.BadRequest(new{message="Chọn một ảnh PNG/JPG/WEBP tối đa 5 MB."});
+            var root=config["Storage:RootPath"];
+            if(string.IsNullOrWhiteSpace(root))return Results.Problem("Chưa cấu hình Storage__RootPath.",statusCode:500);
+            // Xac dinh dinh dang theo magic bytes, khong tin ContentType hay duoi ten tep.
+            byte[] bytes;
+            using(var stream=new MemoryStream()){
+                await file.CopyToAsync(stream);
+                bytes=stream.ToArray();
+            }
+            var png=bytes.Length>=8 && bytes.AsSpan(0,8).SequenceEqual(new byte[]{137,80,78,71,13,10,26,10});
+            var jpeg=bytes.Length>=4 && bytes[0]==255 && bytes[1]==216 && bytes[^2]==255 && bytes[^1]==217;
+            var webp=bytes.Length>=12 && System.Text.Encoding.ASCII.GetString(bytes,0,4)=="RIFF" &&
+                System.Text.Encoding.ASCII.GetString(bytes,8,4)=="WEBP";
+            if(!png&&!jpeg&&!webp)return Results.BadRequest(new{message="Tệp phải là ảnh PNG, JPEG hoặc WEBP hợp lệ."});
+            var extension=png?".png":jpeg?".jpg":".webp";
+            var mime=png?"image/png":jpeg?"image/jpeg":"image/webp";
+            using var cn=db.Open();await cn.OpenAsync();
+            var room=await cn.ExecuteScalarAsync<int?>(@"
+                SELECT a.MaPhongBan FROM dbo.PhanCongCaNhanVanBanDen a
+                JOIN dbo.PhanCongVanBanDen p ON p.MaVanBanDen=a.MaVanBanDen
+                JOIN dbo.KetQuaPhongVanBanDen k ON k.MaVanBanDen=a.MaVanBanDen AND k.MaPhongBan=a.MaPhongBan
+                WHERE a.MaVanBanDen=@id AND a.MaNguoiChuTri=@user AND p.MaCoQuan=@agency
+                  AND p.TrangThai='DANG_XU_LY'",
+                new{id,user=actor.MaNguoiDung,agency=actor.MaCoQuan});
+            if(room is null)return Results.Forbid();
+            var count=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.MinhChungBaoCaoVanBanDen
+                WHERE MaVanBanDen=@id AND MaPhongBan=@room",new{id,room});
+            if(count>=10)return Results.Conflict(new{message="Mỗi phòng chỉ được tải tối đa 10 ảnh minh chứng."});
+            var fileId=Guid.NewGuid();
+            var directory=Path.Combine(root,actor.MaCoQuan.Value.ToString(),"incoming-evidence",id.ToString("N"));
+            Directory.CreateDirectory(directory);
+            var path=Path.Combine(directory,fileId.ToString("N")+extension);
+            await File.WriteAllBytesAsync(path,bytes);
+            var hash=Convert.ToHexString(SHA256.HashData(bytes));
+            try{
+                await cn.ExecuteAsync(@"
+                    INSERT dbo.MinhChungBaoCaoVanBanDen
+                      (MaMinhChung,MaVanBanDen,MaPhongBan,MaNguoiTaiLen,TenTep,LoaiNoiDung,KichThuoc,DuongDanLuuTru,MaBamSha256)
+                    VALUES(@fileId,@id,@room,@user,@name,@mime,@size,@path,@hash)",
+                    new{fileId,id,room,user=actor.MaNguoiDung,
+                        name=Path.GetFileName(file.FileName).Length>255?Path.GetFileName(file.FileName)[..255]:Path.GetFileName(file.FileName),
+                        mime,size=bytes.Length,path,hash});
+            }catch{File.Delete(path);throw;}
+            return Results.Ok(new{message="Đã lưu ảnh minh chứng.",maMinhChung=fileId});
+        }).DisableAntiforgery();
+
+        group.MapGet("/{id:guid}/evidence/{fileId:guid}",async(Guid id,Guid fileId,HttpContext http,
+            PhanQuyen permissions,Database db)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor?.MaCoQuan is null)return Results.Unauthorized();
+            using var cn=db.Open();
+            if(!await CoQuyenXemXuLy(cn,actor,id))return Results.NotFound();
+            var evidence=await cn.QueryFirstOrDefaultAsync<TepMinhChungRow>(@"
+                SELECT DuongDanLuuTru,LoaiNoiDung,TenTep,MaBamSha256
+                FROM dbo.MinhChungBaoCaoVanBanDen WHERE MaMinhChung=@fileId AND MaVanBanDen=@id",
+                new{id,fileId});
+            if(evidence is null || !File.Exists(evidence.DuongDanLuuTru))return Results.NotFound();
+            using var stream=File.OpenRead(evidence.DuongDanLuuTru);
+            var bytes=new byte[stream.Length];
+            await stream.ReadExactlyAsync(bytes);
+            if(Convert.ToHexString(SHA256.HashData(bytes))!=evidence.MaBamSha256)
+                return Results.Conflict(new{message="Ảnh minh chứng không còn nguyên vẹn."});
+            return Results.File(bytes,evidence.LoaiNoiDung,evidence.TenTep);
+        });
+
         group.MapPost("/{id:guid}/complete",async(Guid id,KetThucVanBanDen body,HttpContext http,
             PhanQuyen permissions,Database db)=>{
             var actor=await permissions.NguoiHienTai(http);
@@ -278,5 +398,18 @@ public static class DieuHanhVanBanDenEndpoints
                 WHERE MaVanBanDen=@id AND MaCoQuanNhan=@agency",new{id,agency=actor.MaCoQuan},tx);
             tx.Commit();return Results.Ok(new{message="Đã kết thúc xử lý văn bản đến."});
         });
+    }
+
+    private static async Task<bool> CoQuyenXemXuLy(System.Data.IDbConnection cn,NguoiThucHien actor,Guid id)
+    {
+        var leader=await CoVaiTro(cn,actor.MaNguoiDung,actor.MaCoQuan!.Value,"LANH_DAO","PHO_LANH_DAO");
+        var clerk=await CoVaiTro(cn,actor.MaNguoiDung,actor.MaCoQuan.Value,"VAN_THU");
+        return await cn.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM dbo.PhanCongVanBanDen p
+            JOIN dbo.NguoiDung n ON n.MaNguoiDung=@user
+            WHERE p.MaVanBanDen=@id AND p.MaCoQuan=@agency AND
+                (@leader=1 OR @clerk=1 OR p.MaPhongChuTri=n.MaPhongBan OR EXISTS(
+                   SELECT 1 FROM dbo.PhoiHopVanBanDen h WHERE h.MaVanBanDen=@id AND h.MaPhongBan=n.MaPhongBan))",
+            new{id,user=actor.MaNguoiDung,agency=actor.MaCoQuan,leader,clerk})>0;
     }
 }
