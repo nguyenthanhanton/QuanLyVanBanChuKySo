@@ -18,7 +18,15 @@ type FormState=typeof BLANK;
 async function api(path:string,token:string,init?:RequestInit){
   const response=await fetch(`/api/v1/dossiers${path}`,{...init,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`,...init?.headers}});
   if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.message??`Máy chủ trả lỗi ${response.status}`);}
-  return response.json();
+  // ASP.NET Core serializes anonymous objects and DTOs with camelCase by default.
+  // Normalize recursively so the view consumes the SQL column names consistently.
+  const normalize=(value:unknown):unknown=>{
+    if(Array.isArray(value))return value.map(normalize);
+    if(value!==null&&typeof value==='object')return Object.fromEntries(
+      Object.entries(value).map(([key,item])=>[key[0].toUpperCase()+key.slice(1),normalize(item)]));
+    return value;
+  };
+  return normalize(await response.json());
 }
 function Pages({count,page,change}:{count:number;page:number;change:(n:number)=>void}){
   const total=Math.ceil(count/15);if(total<=1)return null;
@@ -77,7 +85,7 @@ export default function HoSoPage({token,documents,onOpen}:{token:string;document
   const save=async(event:FormEvent)=>{
     event.preventDefault();const newDossier=!editing;
     await perform(async()=>{
-      const result=await api(editing?`/${selected}`:'/',token,{method:editing?'PUT':'POST',body:JSON.stringify(body())});
+      const result=await api(editing?`/${selected}`:'/',token,{method:editing?'PUT':'POST',body:JSON.stringify(body())}) as {MaHoSo:string};
       if(newDossier){setSelected(result.MaHoSo);await loadDetails(result.MaHoSo);}
       else if(selected)await loadDetails(selected);
       setCreating(false);setEditing(false);
