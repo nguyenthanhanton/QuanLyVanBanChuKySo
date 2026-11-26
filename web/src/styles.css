@@ -111,6 +111,15 @@
 @media(max-width:760px){.admin-department-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-department-fields label:last-child{grid-column:1/-1}}
 @media(max-width:540px){.admin-department-create,.admin-department-fields{grid-template-columns:1fr}.admin-department-fields label:last-child{grid-column:auto}.admin-department-actions{justify-content:stretch}.admin-department-actions button{flex:1}}
 .admin-user-row{display:grid;grid-template-columns:minmax(155px,1.1fr) minmax(125px,1fr) minmax(125px,1fr) minmax(160px,1fr) auto;gap:12px;align-items:center;padding:16px 0;border-top:1px solid #e4eaf1}
+.admin-permission-settings{padding:18px;margin:15px 0 22px;background:#f6f9fe;border:1px solid #dbe7f6;border-radius:13px}
+.admin-permission-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}
+.admin-permission-item{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px;background:white;border:1px solid #e1e9f3;border-radius:9px;min-width:0}
+.admin-permission-item>div{display:grid;gap:5px;min-width:0}
+.admin-permission-item strong{font-size:12px;color:#183752}
+.admin-permission-item small{font-size:11px;color:#8192a8;overflow-wrap:anywhere}
+.admin-permission-item select{min-width:132px;max-width:170px;border:1px solid #d7e3ef;border-radius:7px;padding:8px;color:#234365;background:#fff}
+@media(max-width:1050px){.admin-permission-grid{grid-template-columns:1fr}}
+@media(max-width:480px){.admin-permission-item{align-items:stretch;flex-direction:column}.admin-permission-item select{max-width:none;width:100%}}
 .admin-user-row>div:first-child{display:grid;gap:5px}
 .admin-user-row small{color:#71839a}
 .admin-user-row label{font-size:12px;color:#64748b;display:grid;gap:6px}

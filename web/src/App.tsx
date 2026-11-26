@@ -558,6 +558,35 @@ type SignerOption={MaNguoiDung:number;HoTen:string;ChucVu:string;TenPhongBan:str
 type AdminUser={MaNguoiDung:number;TenDangNhap:string;HoTen:string;TenPhongBan:string;
   MaPhongBan:number;MaVaiTro:string;ChucVu:string;DangHoatDong:boolean};
 type AdminOption={MaDinhDanh?:string;TenVaiTro?:string;MaPhongBan?:number;TenPhongBan?:string;ThuTuHienThi?:number};
+type PermissionRow={MaDinhDanh:string;TenQuyen:string;ChoPhep:boolean|null;TuVaiTro:boolean};
+function UserPermissionSettings({token,user,onClose}:{token:string;user:AdminUser;onClose:()=>void}){
+  const [permissions,setPermissions]=useState<PermissionRow[]>([]);
+  const [busy,setBusy]=useState('');const [error,setError]=useState('');const [message,setMessage]=useState('');
+  const load=async()=>{
+    const result=await requestApi(`/admin/users/${user.MaNguoiDung}/permissions`,token) as Record<string,unknown>[];
+    setPermissions(result.map(x=>({MaDinhDanh:String(field(x,'MaDinhDanh')),
+      TenQuyen:String(field(x,'TenQuyen')),ChoPhep:field(x,'ChoPhep')==null?null:Boolean(field(x,'ChoPhep')),
+      TuVaiTro:Boolean(field(x,'TuVaiTro'))})));
+  };
+  useEffect(()=>{load().catch(e=>setError((e as Error).message));},[token,user.MaNguoiDung]);
+  const save=async(code:string,allow:boolean|null)=>{
+    setBusy(code);setError('');setMessage('');
+    try{await requestApi(`/admin/users/${user.MaNguoiDung}/permissions`,token,{method:'PUT',
+      body:JSON.stringify({maDinhDanh:code,choPhep:allow})});await load();setMessage('Đã cập nhật quyền. Áp dụng ngay cho các yêu cầu API tiếp theo.');}
+    catch(e){setError((e as Error).message);}finally{setBusy('');}
+  };
+  return <section className="admin-permission-settings"><div className="panel-head"><div>
+    <h3>Phân quyền — {user.HoTen}</h3><p>Chọn kế thừa từ chức vụ, cho phép hoặc từ chối từng quyền nghiệp vụ.</p>
+    </div><button className="secondary small" onClick={onClose}><X size={16}/> Đóng</button></div>
+    <div className="admin-permission-grid">{permissions.map(p=><div className="admin-permission-item" key={p.MaDinhDanh}>
+      <div><strong>{p.TenQuyen}</strong><small>{p.MaDinhDanh} · Chức vụ: {p.TuVaiTro?'có quyền':'không có quyền'}</small></div>
+      <select aria-label={`Quyền ${p.TenQuyen}`} disabled={!!busy} value={p.ChoPhep===null?'inherit':p.ChoPhep?'allow':'deny'}
+        onChange={e=>save(p.MaDinhDanh,e.target.value==='inherit'?null:e.target.value==='allow')}>
+        <option value="inherit">Theo chức vụ</option><option value="allow">Cho phép</option><option value="deny">Từ chối</option>
+      </select></div>)}</div>
+    {error&&<div className="form-error">{error}</div>}{message&&<p className="success-note">{message}</p>}
+  </section>;
+}
 type ManagedDepartment={MaPhongBan:number;MaDinhDanh:string;TenPhongBan:string;ThuTuHienThi:number;
   MaPhongBanCha:number|null;DangHoatDong:boolean;SoNguoiDung:number;SoPhongBanCon:number};
 function DepartmentAdministration({token}:{token:string}){
@@ -631,7 +660,7 @@ function DepartmentAdministration({token}:{token:string}){
     {error&&<div className="form-error">{error}</div>}{message&&<p className="success-note">{message}</p>}
   </section>;
 }
-function UserAdministration({token,username}:{token:string;username:string}){
+function UserAdministration({token,username,canManagePermissions}:{token:string;username:string;canManagePermissions:boolean}){
   const [users,setUsers]=useState<AdminUser[]>([]);
   const [departments,setDepartments]=useState<AdminOption[]>([]);
   const [roles,setRoles]=useState<AdminOption[]>([]);
@@ -640,6 +669,7 @@ function UserAdministration({token,username}:{token:string;username:string}){
   const [role,setRole]=useState('CHUYEN_VIEN');const [positionName,setPositionName]=useState('');
   const [edits,setEdits]=useState<Record<number,{department:number;role:string;positionName:string}>>({});
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [message,setMessage]=useState('');
+  const [permissionUser,setPermissionUser]=useState<number|null>(null);
   const load=async()=>{
     const [options,accounts]=await Promise.all([
       requestApi('/admin/options',token),requestApi('/admin/users',token)
@@ -712,6 +742,9 @@ function UserAdministration({token,username}:{token:string;username:string}){
       </form></section>
     <section className="panel admin-users-list"><div className="panel-head"><div><h3>Người dùng trong cơ quan</h3><p>{users.length} tài khoản</p></div>
       <button className="secondary small" disabled={busy} onClick={()=>load().catch(e=>setError((e as Error).message))}><RefreshCw size={15}/> Tải lại</button></div>
+      {permissionUser!==null&&users.find(u=>u.MaNguoiDung===permissionUser)&&<UserPermissionSettings
+        key={permissionUser} token={token} user={users.find(u=>u.MaNguoiDung===permissionUser)!}
+        onClose={()=>setPermissionUser(null)}/>}
       {orderedUsers.map((u,index)=>{const edit=edits[u.MaNguoiDung]??{department:u.MaPhongBan,role:u.MaVaiTro,positionName:u.ChucVu};
         const own=u.TenDangNhap===username;const protectedUser=u.MaVaiTro==='AGENCY_ADMIN'||own;
         const groupStart=index===0||orderedUsers[index-1].MaPhongBan!==u.MaPhongBan;
@@ -733,6 +766,8 @@ function UserAdministration({token,username}:{token:string;username:string}){
             onChange={e=>setEdits(s=>({...s,[u.MaNguoiDung]:{...edit,positionName:e.target.value}}))} placeholder="VD: Trưởng văn phòng"/></label>
           <div className="admin-user-actions"><button className="secondary small" disabled={busy||protectedUser||!edit.department||!edit.role}
             onClick={()=>action(()=>requestApi(`/admin/users/${u.MaNguoiDung}/assignment`,token,{method:'PUT',body:JSON.stringify({maPhongBan:edit.department,maVaiTro:edit.role,tenChucVu:edit.positionName})}),'Đã cập nhật phân công.')}>Lưu phân công</button>
+            {canManagePermissions&&!protectedUser&&<button className="secondary small" disabled={busy}
+              onClick={()=>setPermissionUser(u.MaNguoiDung)}><ShieldCheck size={14}/> Phân quyền</button>}
             <button className="secondary small" disabled={busy||protectedUser}
               onClick={()=>action(()=>requestApi(`/admin/users/${u.MaNguoiDung}/status`,token,{method:'PUT',body:JSON.stringify({dangHoatDong:!u.DangHoatDong})}),u.DangHoatDong?'Đã khóa tài khoản.':'Đã mở tài khoản.')}>{u.DangHoatDong?'Khóa':'Mở khóa'}</button></div>
         </div></Fragment>;})}
@@ -1249,7 +1284,7 @@ export default function App() {
 
       {page==='quan-tri'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ CƠ QUAN · 0.6.1</div><h1>Quản trị tài khoản</h1>
         <p>Tạo tài khoản, phân công phòng ban và chức vụ. Quản trị viên không mặc nhiên được xem văn bản nghiệp vụ.</p></div></div>
-        {!DEMO?<UserAdministration token={token} username={actor.username}/>:
+        {!DEMO?<UserAdministration token={token} username={actor.username} canManagePermissions={isAllowed(actor,'permissions.manage')}/>:
           <div className="panel">Chức năng quản trị tài khoản chỉ sử dụng khi kết nối API thật.</div>}</>}
 
       {page==='co-cau'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ CƠ QUAN · 0.6.3</div>
