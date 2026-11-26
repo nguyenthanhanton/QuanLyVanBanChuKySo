@@ -250,7 +250,7 @@ public static class LuuTruNangCaoEndpoints
             if(!string.Equals(await DichVuKyPdf.Bam(file.DuongDanLuuTru),file.MaBamSha256,StringComparison.OrdinalIgnoreCase))
                 return Results.Conflict(new{message="Tệp PDF đã thay đổi so với mã băm lưu trữ."});
             await GhiKhaiThac(cn,request,actor,documentId,"TAI_PDF");
-            return Results.PhysicalFile(file.DuongDanLuuTru,"application/pdf",$"ho-so-{documentId:N}.pdf");
+            return Results.File(file.DuongDanLuuTru,"application/pdf",$"ho-so-{documentId:N}.pdf");
         });
 
         route.MapGet("/access/{request:long}/attachments/{documentId:guid}",async(long request,Guid documentId,
@@ -286,7 +286,7 @@ public static class LuuTruNangCaoEndpoints
             if(!string.Equals(await DichVuKyPdf.Bam(file.DuongDanLuuTru),file.MaBamSha256,StringComparison.OrdinalIgnoreCase))
                 return Results.Conflict(new{message="Tệp đính kèm không còn đúng mã băm SHA-256."});
             await GhiKhaiThac(cn,request,actor,documentId,"TAI_TEP_DINH_KEM");
-            return Results.PhysicalFile(file.DuongDanLuuTru,"application/octet-stream",file.TenTep);
+            return Results.File(file.DuongDanLuuTru,"application/octet-stream",file.TenTep);
         });
 
         route.MapGet("/{id:guid}/integrity",async(Guid id,HttpContext http,PhanQuyen auth,
