@@ -614,7 +614,14 @@ public static class KySoEndpoints
                       WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency
                         AND r.MaDinhDanh IN ('TRUONG_PHONG','TRUONG_VAN_PHONG','LANH_DAO','VAN_THU'))
                     OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t
-                        WHERE t.MaVanBan=v.MaVanBan AND t.MaNguoiDuocGiao=@user AND t.MaCoQuan=@agency))
+                        WHERE t.MaVanBan=v.MaVanBan AND t.MaNguoiDuocGiao=@user AND t.MaCoQuan=@agency)
+                    OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t
+                        JOIN dbo.UyQuyenKyTacVu q ON q.MaTacVu=t.MaTacVu
+                        WHERE t.MaVanBan=v.MaVanBan AND t.MaCoQuan=@agency
+                          AND t.TrangThai='CHO_XU_LY' AND q.MaCoQuan=@agency
+                          AND q.MaNguoiGoc=t.MaNguoiDuocGiao AND q.MaNguoiDuocUyQuyen=@user
+                          AND q.DaThuHoi=0 AND q.HieuLucTu<=SYSUTCDATETIME()
+                          AND q.HieuLucDen>SYSUTCDATETIME()))
                 ORDER BY p.ThuTuKy DESC",new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung});
             if(pdf==null || !File.Exists(pdf.DuongDanLuuTru))return Results.NotFound();
             var sha=await DichVuKyPdf.Bam(pdf.DuongDanLuuTru);
@@ -638,7 +645,14 @@ public static class KySoEndpoints
                    JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro WHERE uv.MaNguoiDung=@user
                    AND uv.MaCoQuan=@agency AND r.MaDinhDanh IN ('TRUONG_PHONG','TRUONG_VAN_PHONG','LANH_DAO','VAN_THU'))
                    OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t WHERE t.MaVanBan=v.MaVanBan
-                       AND t.MaNguoiDuocGiao=@user AND t.MaCoQuan=@agency))
+                       AND t.MaNguoiDuocGiao=@user AND t.MaCoQuan=@agency)
+                    OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t
+                        JOIN dbo.UyQuyenKyTacVu q ON q.MaTacVu=t.MaTacVu
+                        WHERE t.MaVanBan=v.MaVanBan AND t.MaCoQuan=@agency
+                          AND t.TrangThai='CHO_XU_LY' AND q.MaCoQuan=@agency
+                          AND q.MaNguoiGoc=t.MaNguoiDuocGiao AND q.MaNguoiDuocUyQuyen=@user
+                          AND q.DaThuHoi=0 AND q.HieuLucTu<=SYSUTCDATETIME()
+                          AND q.HieuLucDen>SYSUTCDATETIME()))
                 ORDER BY p.ThuTuKy DESC",new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung});
             if(pdf==null || !File.Exists(pdf.DuongDanLuuTru))return Results.NotFound();
             if(await DichVuKyPdf.Bam(pdf.DuongDanLuuTru)!=pdf.MaBamSha256)
