@@ -42,6 +42,11 @@
 .recipient-picks{display:flex;flex-direction:column;gap:9px;border:1px solid #dbe7f2;background:#f7fbff;border-radius:9px;padding:12px;max-height:160px;overflow-y:auto}
 .recipient-picks label{display:flex;align-items:center;gap:9px;color:#41617f;font-size:12px;font-weight:500;cursor:pointer}
 .recipient-picks input{accent-color:#327abd;width:16px;height:16px;flex-shrink:0}
+/* The modal's generic input/label rules must not stretch recipient checkboxes. */
+.modal-grid>div{min-width:0}
+.modal-content .recipient-picks{box-sizing:border-box;width:100%;overflow-x:hidden;overflow-y:auto}
+.modal-grid .recipient-picks label{display:flex;align-items:center;gap:10px;width:100%;min-width:0;margin:0;padding:7px 4px;font-size:12px;font-weight:500;line-height:1.5;white-space:normal;overflow-wrap:anywhere}
+.modal-content .recipient-picks input[type="checkbox"]{box-sizing:border-box;display:block;width:16px;height:16px;min-width:16px;min-height:16px;flex:0 0 16px;margin:0;padding:0;border-radius:4px;cursor:pointer}
 @media(max-width:620px){.signature-live .form-grid{grid-template-columns:1fr}.live-deliveries .delivery-live-row{padding:16px;align-items:flex-start}.delivery-live-actions{width:100%}}
 .draft-files-editor{padding:4px 0 22px;border-bottom:1px solid #e7edf5;margin-bottom:20px}
 .draft-files-editor h3{margin:12px 0 8px}
@@ -286,3 +291,23 @@
 .incoming-evidence-card img{display:block;width:100%;height:150px;object-fit:contain;background:#f4f6fa;border-radius:6px}
 .incoming-evidence-selection img{display:block;max-width:100%;max-height:280px;object-fit:contain;border-radius:6px}
 .incoming-evidence-card small,.incoming-evidence-selection small{overflow-wrap:anywhere;color:#65748b}
+.registered-signatures-panel,.signature-registration-panel{padding:24px;margin-bottom:24px}
+.registered-signatures-panel>h3,.signature-registration-panel>h3{font-size:16px;color:#173552;margin:0 0 20px;font-weight:800}
+.registered-signatures-list{display:flex;flex-direction:column}
+.registered-signature-row{display:flex;align-items:center;gap:20px;padding:16px 0;border-bottom:1px solid #e8edf4;min-width:0}
+.registered-signature-row:last-child{border-bottom:0}
+.registered-signature-preview{width:164px;height:86px;flex:none;border:1px solid #dce7f2;border-radius:10px;background:linear-gradient(135deg,#fff,#f5f9fe);display:flex;align-items:center;justify-content:center;padding:10px;overflow:hidden}
+.registered-signature-preview img{max-width:100%;max-height:100%;object-fit:contain}
+.registered-signature-preview span{font-size:11px;color:#8b9bb0;text-align:center}
+.registered-signature-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
+.registered-signature-info strong{font-size:13px;color:#173552;overflow-wrap:anywhere}
+.registered-signature-info span{font-size:11px;color:#8295ab;line-height:1.6}
+.registered-signature-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.signature-registration-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 22px;margin:16px 0}
+.signature-registration-grid label{display:flex;flex-direction:column;gap:8px;min-width:0;color:#405a78;font-weight:700;font-size:12px;line-height:1.5}
+.signature-registration-grid input,.signature-registration-grid select{display:block;width:100%;min-width:0;max-width:100%;min-height:43px;border:1px solid #d6e2f0;border-radius:8px;background:#fff;padding:10px 12px;font:inherit;font-weight:500;color:#28445d;box-sizing:border-box}
+.signature-registration-grid input[type=file]{padding:8px;font-size:11px}
+.signature-registration-check{display:flex;align-items:flex-start;gap:10px;font-size:12px;line-height:1.7;color:#47627e;margin:18px 0}
+.signature-registration-check input{flex:none;margin-top:4px;accent-color:#2b74b9}
+.signature-registration-panel>.primary{margin-top:4px}
+@media(max-width:760px){.signature-registration-grid{grid-template-columns:1fr}.registered-signature-row{flex-wrap:wrap;gap:12px}.registered-signature-preview{width:120px;height:75px}.registered-signature-actions{width:100%;padding-left:0}.registered-signatures-panel,.signature-registration-panel{padding:18px}}

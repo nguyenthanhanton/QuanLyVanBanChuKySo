@@ -19,6 +19,7 @@ import ChiTietVanBanDen from './ChiTietVanBanDen';
 import ThongTinTaiKhoan from './ThongTinTaiKhoan';
 import QuanTriHeThong from './QuanTriHeThong';
 import ThongTinCoQuan from './ThongTinCoQuan';
+import QuanLyChuKySo from './QuanLyChuKySo';
 
 const DEMO = import.meta.env.VITE_DEMO_MODE !== 'false';
 const APP_TITLE = 'Văn thư số';
@@ -41,6 +42,9 @@ const navigation: Navigation = [
     { id:'bao-cao',label:'Báo cáo thống kê',icon:Activity,permission:'reports.read' },
     { id:'giam-sat',label:'Giám sát tiến độ',icon:Clock3,permission:'reports.read' },
   ] },
+  { group:'CHỮ KÝ SỐ',items:[
+    {id:'chu-ky-so',label:'Quản lý chữ ký số',icon:FileSignature,permission:'signing.sign'},
+  ] },
   { group: 'QUẢN TRỊ', items: [
     { id:'quan-tri-he-thong',label:'Quản trị hệ thống',icon:ShieldCheck,permission:'agencies.manage' },
     { id:'quan-tri',label:'Quản trị tài khoản',icon:Settings2,permission:'users.manage' },
@@ -55,6 +59,7 @@ const names: Record<Trang, string> = {
   'ho-so':'Hồ sơ lưu trữ', 'bao-cao':'Báo cáo thống kê', 'giam-sat':'Giám sát tiến độ', 'quan-tri':'Quản trị tài khoản',
   'co-cau':'Quản lý cơ cấu phòng ban', 'uy-quyen':'Ủy quyền ký thay',
   'quan-tri-he-thong':'Quản trị toàn hệ thống'
+  ,'chu-ky-so':'Quản lý chữ ký số'
 };
 
 function loadStoredSession():{actor:Actor;token:string;page:Trang}|null {
@@ -294,13 +299,8 @@ function TransferCards({doc}:{doc:VanBan}) {
 function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:Actor|null;token:string;onUpdated:()=>Promise<void>;taskStep?:string}) {
   const total=doc.signingSteps??5;
   const [accountPassword,setAccountPassword]=useState('');
-  const [pfxPassword,setPfxPassword]=useState('');
-  const [certName,setCertName]=useState('');
-  const [certType,setCertType]=useState('CA_NHAN');
-  const [testCert,setTestCert]=useState(false);
-  const [replaceTestCert,setReplaceTestCert]=useState(false);
-  const [pfxFile,setPfxFile]=useState<File>();
   const [signatureImage,setSignatureImage]=useState<File>();
+  const [selectedCredential,setSelectedCredential]=useState('');
   const [signaturePage,setSignaturePage]=useState(1);
   const [signatureX,setSignatureX]=useState(60);
   const [signatureY,setSignatureY]=useState(73);
@@ -331,6 +331,18 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
     }).catch(err=>{if(alive)setPlacementError((err as Error).message);});
     return ()=>{alive=false;};
   },[doc.id,doc.version,token]);
+  useEffect(()=>{
+    setPlacementConfirmed(false);setSignatureImage(undefined);
+    if(!selectedCredential)return;
+    let active=true;
+    fetch(`/api/v1/signing-credentials/${selectedCredential}/image`,{
+      headers:{Authorization:`Bearer ${token}`}}).then(async response=>{
+      if(!response.ok)throw new Error(`Không tải được ảnh chữ ký (${response.status}).`);
+      const blob=await response.blob();
+      if(active)setSignatureImage(new File([blob],'chu-ky-da-dang-ky.png',{type:'image/png'}));
+    }).catch(error=>{if(active)setPlacementError((error as Error).message);});
+    return()=>{active=false;};
+  },[selectedCredential,token]);
   const operation=async(kind:'prepare'|'sign'|'draft-sign'|'agency-sign'|'publish'|'verify'|'download',signature?:string)=>{
     setBusy(true);setMessage('');
     try {
@@ -340,28 +352,17 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
         setVerify(await requestApi(`/documents/${doc.id}/signatures/verification`,token));
       } else {
         if(kind==='sign'||kind==='draft-sign'||kind==='agency-sign'){
-          if(!signatureImage||!placementConfirmed)throw new Error('Hãy chọn ảnh PNG, kéo đặt chữ ký trên PDF và xác nhận vị trí trước khi ký.');
+          if(!selectedCredential||!signatureImage||!placementConfirmed)throw new Error('Hãy chọn chữ ký đã đăng ký, đặt vị trí trên PDF và xác nhận trước khi ký.');
           if(!accountPassword)throw new Error('Cần nhập mật khẩu để xác nhận ký.');
         }
         const endpoint=kind==='prepare'?`/documents/${doc.id}/prepared-pdf`:
           kind==='sign'?`/documents/${doc.id}/signatures`:
           kind==='draft-sign'?`/documents/${doc.id}/draft-signature`:
           kind==='agency-sign'?`/documents/${doc.id}/agency-signature`:`/documents/${doc.id}/publications`;
-        let imageBase64:string|undefined;
-        if(signatureImage&&(kind==='sign'||kind==='draft-sign'||kind==='agency-sign')){
-          if(signatureImage.size>5*1024*1024||signatureImage.type!=='image/png')
-            throw new Error('Ảnh ký phải là PNG tối đa 5 MB.');
-          const url=await new Promise<string>((resolve,reject)=>{
-            const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));
-            reader.onerror=()=>reject(new Error('Không đọc được ảnh chữ ký.'));
-            reader.readAsDataURL(signatureImage);
-          });
-          imageBase64=url.split(',')[1];
-        }
         const payload=kind==='sign'||kind==='draft-sign'||kind==='agency-sign'?{
           loaiChuKy:kind==='draft-sign'?'KY_NGUOI_SOAN':kind==='agency-sign'?'KY_CO_QUAN':signature,
           matKhau:accountPassword,maYeuCau:crypto.randomUUID(),
-          hinhAnhKyBase64:imageBase64,trangKy:signaturePage,
+          maChungThu:selectedCredential,trangKy:signaturePage,
           tyLeX:signatureX/100,tyLeY:signatureY/100,
           tyLeRong:signatureWidth/100,tyLeCao:signatureHeight/100}:
           {maYeuCau:crypto.randomUUID()};
@@ -374,54 +375,24 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
       }
     } catch(err){setMessage((err as Error).message);}finally{setBusy(false);}
   };
-  const createCredential=async()=>{
-    setBusy(true);setMessage('');
-    try {
-      if(!accountPassword)throw new Error('Nhập mật khẩu tài khoản để xác nhận.');
-      if(!testCert&&!pfxFile)throw new Error('Chọn tệp PFX/P12 của bạn.');
-      if(replaceTestCert&&!testCert)throw new Error('Chỉ được thay chứng thư tự ký thử nghiệm.');
-      const form=new FormData();form.set('loaiChungThu',certType);form.set('tenChungThu',certName);
-      form.set('matKhau',accountPassword);form.set('matKhauPfx',pfxPassword);
-      form.set('thayTheChungThuThuNghiem',String(replaceTestCert));
-      form.set('thuNghiem',String(testCert));if(pfxFile)form.set('tepPfx',pfxFile);
-      const result=await requestApi('/signing-credentials',token,{method:'POST',body:form});
-      setMessage((result.daThayThe?'Đã lưu chứng thư thử nghiệm mới; chứng thư cũ vẫn được giữ để tra cứu.':
-        result.noiBoThuNghiem?'Đã tạo chứng thư thử nghiệm nội bộ.':'Đã nhập chứng thư;')+
-        ' Hệ thống chưa thẩm định chuỗi CA/thu hồi.');
-      setAccountPassword('');setPfxPassword('');setPfxFile(undefined);setReplaceTestCert(false);
-      setCredentials(await requestApi('/signing-credentials',token));
-    }catch(err){setMessage((err as Error).message);}finally{setBusy(false);}
-  };
   const activeCreds=credentials.filter(c=>field(c,'DangHoatDong')===true);
   const signatures=(field(verify??{},'ChuKy') as Record<string,unknown>[]|undefined)??[];
   return <section className="drawer-section signature-live">
     <div className="signature-header"><div className="signature-icon"><ShieldCheck size={30}/></div>
       <h3>Ký số PDF và xác minh</h3><p>Chữ ký CMS bảo đảm toàn vẹn; ảnh PNG chỉ là phần hiển thị trong vùng chữ ký số.</p></div>
-    <div className="form-section"><h4>Chứng thư đang sử dụng</h4>
-      {activeCreds.map(c=><div className="version-row" key={String(field(c,'MaChungThu'))}>
-        <ShieldCheck size={18}/><div><strong>{String(field(c,'TenChungThu'))}</strong><span>{String(field(c,'LoaiChungThu'))} · {field(c,'NguonChungThu')==='TU_KY_THU_NGHIEM'?'Thử nghiệm nội bộ':'PFX nhập'} · Hết hạn {formatDate(String(field(c,'NgayHetHan')))}</span></div>
-      </div>)}
-      <div className="form-grid"><label>Loại chứng thư<select value={certType} onChange={e=>setCertType(e.target.value)}>
-        <option value="CA_NHAN">Cá nhân</option><option value="CO_QUAN">Cơ quan (văn thư)</option></select></label>
-        <label>Tên chứng thư<input value={certName} onChange={e=>setCertName(e.target.value)} placeholder="Tên cá nhân / cơ quan"/></label></div>
-      <label className="form-check"><input type="checkbox" checked={testCert} onChange={e=>setTestCert(e.target.checked)}/>
-        Tạo chứng thư tự ký để thử nghiệm (không được coi là chữ ký số được CA công nhận)</label>
-      {testCert&&activeCreds.some(c=>String(field(c,'LoaiChungThu'))===certType)&&
-        <label className="form-check"><input type="checkbox" checked={replaceTestCert} onChange={e=>setReplaceTestCert(e.target.checked)}/>
-          Thay thế chứng thư thử nghiệm cũ (không xóa chứng thư cũ hoặc PDF đã ký)</label>}
-      {!testCert&&<><label>Nhập chứng thư PFX/P12<input type="file" accept=".pfx,.p12" onChange={e=>setPfxFile(e.target.files?.[0])}/></label>
-        <label>Mật khẩu tệp PFX<input type="password" value={pfxPassword} onChange={e=>setPfxPassword(e.target.value)}/></label></>}
-      <label>Mật khẩu tài khoản để ký / nhập chứng thư<input type="password" value={accountPassword} onChange={e=>setAccountPassword(e.target.value)}/></label>
-      <button className="secondary small" disabled={busy||certName.trim().length<3||
-        !isAllowed(actor,certType==='CA_NHAN'?'signatures.manage-own':'signatures.manage-agency')}
-        onClick={createCredential}>Lưu chứng thư</button></div>
+    <div className="form-section"><h4>Chọn chữ ký đã đăng ký</h4>
+      <p className="fine-note">Chữ ký được đăng ký trước trong mục Quản lý chữ ký số. Văn thư chọn chữ ký cơ quan do lãnh đạo cấp trưởng đã đăng ký.</p>
+      <label>Chữ ký dùng cho bước hiện tại<select value={selectedCredential} onChange={e=>{setSelectedCredential(e.target.value);setPlacementConfirmed(false);setPlacementError('');}}>
+        <option value="">— Chọn chữ ký số —</option>
+        {activeCreds.filter(c=>Boolean(field(c,'CoAnhChuKy')) && String(field(c,'LoaiChungThu'))===(doc.status==='DA_CAP_SO'?'CO_QUAN':'CA_NHAN'))
+          .map(c=><option key={String(field(c,'MaChungThu'))} value={String(field(c,'MaChungThu'))}>{String(field(c,'TenMauChuKy')||field(c,'TenChungThu'))}</option>)}
+      </select></label>
+      <label>Mật khẩu tài khoản để xác nhận ký<input type="password" value={accountPassword} onChange={e=>setAccountPassword(e.target.value)}/></label>
+    </div>
     <div className="form-section"><h4>Các bước ký và phát hành</h4>
       {['NHAP','TRA_SUA','CHO_DUYET','DA_CAP_SO'].includes(doc.status)&&<div className="form-section">
         <h4>Xem PDF và kéo thả hình chữ ký trước khi ký</h4>
-        <p className="fine-note">1. Chọn ảnh PNG nền trong suốt tối đa 5 MB. 2. Nhấn “Mở PDF để đặt chữ ký”, kéo ảnh vào vị trí và chỉnh kích thước. 3. Xác nhận vị trí rồi mới nhấn ký số. Không hỗ trợ trang PDF xoay.</p>
-        <label>Ảnh chữ ký / con dấu (PNG)
-          <input type="file" accept="image/png,.png" onChange={e=>{setSignatureImage(e.target.files?.[0]);setPlacementConfirmed(false);}}/>
-        </label>
+        <p className="fine-note">1. Chọn chữ ký đã đăng ký. 2. Nhấn “Mở PDF để đặt chữ ký”, kéo hình vào vị trí và chỉnh kích thước. 3. Xác nhận vị trí rồi nhấn ký số. Không hỗ trợ trang PDF xoay.</p>
         {placementError&&<div className="form-error">{placementError}</div>}
         <button className="primary small" disabled={busy||!signatureImage||!mainPdfPath}
           onClick={()=>{setPlacementConfirmed(false);setPlacementOpen(true);}}>Mở PDF để đặt chữ ký</button>
@@ -456,7 +427,7 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
       </div>}
       {doc.status==='DA_CAP_SO'&&<>
         <p className="fine-note">Bước {total}/{total}: Văn thư ký số cơ quan trên PDF đã được lãnh đạo duyệt.</p>
-        {isAllowed(actor,'signing.sign')&&isAllowed(actor,'signatures.manage-agency')&&
+        {isAllowed(actor,'signing.sign')&&
           <button className="primary small" disabled={busy||signatures.length!==total-1}
             onClick={()=>operation('agency-sign')}>{total}/{total}. Văn thư ký số cơ quan</button>}
       </>}
@@ -1119,13 +1090,15 @@ function DocumentDetails({doc,onClose,onAction,allowed,canDecide,taskStep,liveTi
   </div>;
 }
 
-function NewDocument({onClose,onCreate,live,recipients}:{onClose:()=>void,onCreate:(input:{title:string;excerpt:string;to:string[];urgency:VanBan['urgency'];mainFile:File;files:File[]})=>Promise<void>,live:boolean,recipients:{value:string;label:string}[]}) {
+function NewDocument({onClose,onCreate,live,recipients,recipientsLoading,recipientsError,onReloadRecipients}:{onClose:()=>void,onCreate:(input:{title:string;excerpt:string;to:string[];urgency:VanBan['urgency'];mainFile:File;files:File[]})=>Promise<void>,live:boolean,recipients:{value:string;label:string}[],recipientsLoading:boolean,recipientsError:string,onReloadRecipients:()=>void}) {
   const [title,setTitle]=useState('');const [excerpt,setExcerpt]=useState('');
   const [to,setTo]=useState<string[]>([]);const [urgency,setUrgency]=useState<VanBan['urgency']>('THUONG');
   const [mainFile,setMainFile]=useState<File|null>(null);
   const [files,setFiles]=useState<File[]>([]);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
   const submit=async(e:FormEvent)=>{e.preventDefault();setBusy(true);setError('');
-    try{if(to.length===0)throw new Error('Chọn ít nhất một cơ quan nhận.');
+    try{if(recipientsLoading)throw new Error('Đang tải danh sách cơ quan nhận, vui lòng đợi.');
+      if(recipientsError)throw new Error('Không tải được danh sách cơ quan nhận. Hãy nhấn Tải lại trước khi tạo văn bản.');
+      if(to.length===0)throw new Error(recipients.length?'Chọn ít nhất một cơ quan nhận.':'Chưa có cơ quan nhận khả dụng. Hãy liên hệ quản trị viên để kiểm tra cấu hình cơ quan.');
       if(!mainFile)throw new Error('Chọn văn bản chính dạng PDF để ký số.');
       if(!mainFile.name.toLowerCase().endsWith('.pdf'))throw new Error('Văn bản chính phải là PDF.');
       await onCreate({title,excerpt,to,urgency,mainFile,files});onClose();}catch(err){setError((err as Error).message);}finally{setBusy(false);}};
@@ -1136,7 +1109,9 @@ function NewDocument({onClose,onCreate,live,recipients}:{onClose:()=>void,onCrea
       <div className="modal-grid"><div><label>Cơ quan nhận dự kiến (có thể chọn nhiều)</label><div className="recipient-picks">
         {recipients.map(r=><label key={r.value}><input type="checkbox" checked={to.includes(r.value)}
           onChange={e=>setTo(prev=>e.target.checked?[...prev,r.value]:prev.filter(x=>x!==r.value))}/>{r.label}</label>)}
-        {recipients.length===0&&<span className="subtle">Chưa có cơ quan nhận được cấu hình.</span>}
+        {recipientsLoading&&<span className="subtle">Đang tải cơ quan nhận...</span>}
+        {!recipientsLoading&&recipientsError&&<span className="form-error">{recipientsError}</span>}
+        {!recipientsLoading&&!recipientsError&&recipients.length===0&&<span className="subtle">Chưa có cơ quan nhận khả dụng.</span>}
         </div></div>
         <div><label>Độ khẩn</label><select value={urgency} onChange={e=>setUrgency(e.target.value as VanBan['urgency'])}><option value="THUONG">Thường</option><option value="KHAN">Khẩn</option><option value="HOA_TOC">Hỏa tốc</option></select></div></div>
       <div className="upload-part"><label>1. Văn bản chính — PDF dùng để ký <span>*</span></label>
@@ -1146,6 +1121,7 @@ function NewDocument({onClose,onCreate,live,recipients}:{onClose:()=>void,onCrea
         <label className="file-upload"><CloudUpload size={22}/><span>{files.length?`${files.length} tệp: ${files.map(f=>f.name).join(', ')}`:'Chọn các tệp đi kèm văn bản chính'}</span><small>Tối đa 20 tệp tính cả PDF chính; 25 MB/tệp</small>
           <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx" onChange={e=>setFiles(Array.from(e.target.files??[]))}/></label></div>
       <p className="fine-note">Trong lúc soạn có thể thay PDF chính hoặc thêm/bỏ tệp đính kèm. Tiêu đề đã tạo không được đổi.</p>
+      {!recipientsLoading&&(recipientsError||recipients.length===0)&&<button type="button" className="secondary" onClick={onReloadRecipients}>Tải lại cơ quan nhận</button>}
       {error&&<div className="form-error">{error}</div>}
     </div><div className="modal-footer"><button type="button" className="secondary" onClick={onClose}>Hủy</button><button className="primary" disabled={busy}>{busy?'Đang lưu...':'Tạo bản dự thảo'}<ArrowRight size={17}/></button></div>
   </form></div>;
@@ -1211,7 +1187,26 @@ export default function App() {
     return()=>{active=false;};
   },[token,page]);
   const [agencyOptions,setAgencyOptions]=useState<{value:string;label:string}[]>(DEMO?[{value:'Cơ quan B',label:'Cơ quan B'},{value:'Cơ quan C',label:'Cơ quan C'}]:[]);
+  const [recipientsLoading,setRecipientsLoading]=useState(false);
+  const [recipientsError,setRecipientsError]=useState('');
+  const [recipientsReload,setRecipientsReload]=useState(0);
   const [error,setError]=useState('');
+
+  useEffect(()=>{
+    if(DEMO||!token||restoring)return;
+    let active=true;
+    setRecipientsLoading(true);setRecipientsError('');
+    requestApi('/agencies/recipients',token)
+      .then(result=>{
+        if(!active)return;
+        const agencies=result as Record<string,unknown>[];
+        if(!Array.isArray(agencies))throw new Error('Dữ liệu cơ quan nhận không hợp lệ.');
+        setAgencyOptions(agencies.map(a=>({value:String(field(a,'MaCoQuan')),label:String(field(a,'TenCoQuan'))})));
+      })
+      .catch(err=>{if(active){setAgencyOptions([]);setRecipientsError(`Không tải được cơ quan nhận: ${(err as Error).message}`);}})
+      .finally(()=>{if(active)setRecipientsLoading(false);});
+    return()=>{active=false;};
+  },[token,restoring,createOpen,recipientsReload]);
 
   useEffect(()=>{
     if(DEMO||!storedSession?.token){setRestoring(false);return;}
@@ -1403,10 +1398,6 @@ export default function App() {
     }catch{/* Thông tin cơ bản vẫn lấy từ phiên đăng nhập. */}
     const start=navigation.flatMap(g=>g.items).find(i=>caps.includes(i.permission));
     setPage(start?.id??'quan-tri');
-    try{
-      const agencies=await requestApi('/agencies/recipients',body.accessToken) as Record<string,unknown>[];
-      setAgencyOptions(agencies.map(a=>({value:String(field(a,'MaCoQuan')),label:String(field(a,'TenCoQuan'))})));
-    }catch{setAgencyOptions([]);}
     if(caps.includes('documents.read'))await refresh(body.accessToken,caps);
   };
 
@@ -1711,6 +1702,9 @@ export default function App() {
         {!DEMO?<UserAdministration token={token} username={actor.username} canManagePermissions={isAllowed(actor,'permissions.manage')}/>:
           <div className="panel">Chức năng quản trị tài khoản chỉ sử dụng khi kết nối API thật.</div>}</>}
 
+      {page==='chu-ky-so'&&(!DEMO?<QuanLyChuKySo token={token} capabilities={actor.capabilities}/>:
+        <div className="panel">Vui lòng kết nối API thật để quản lý chữ ký số.</div>)}
+
       {page==='quan-tri-he-thong'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ TOÀN HỆ THỐNG</div>
         <h1>Quản lý cơ quan</h1><p>Tạo cơ quan, cấp tài khoản quản trị và kiểm tra nhật ký kỹ thuật. Không truy cập nội dung văn bản của cơ quan.</p></div></div>
         {!DEMO?<QuanTriHeThong token={token}/>:
@@ -1736,7 +1730,7 @@ export default function App() {
       canDecide={DEMO?currentDoc.assignee===actor.name:workqueue.some(t=>String(field(t,'MaVanBan'))===currentDoc.id)}
       taskStep={String(field(workqueue.find(t=>String(field(t,'MaVanBan'))===currentDoc.id)??{},'Buoc')??'')}
       liveTimeline={remoteTimeline} token={token} onUpdated={updateAfterOperation}/>}
-    {createOpen&&<NewDocument onClose={()=>setCreateOpen(false)} onCreate={create} live={!DEMO} recipients={agencyOptions}/>}
+    {createOpen&&<NewDocument onClose={()=>setCreateOpen(false)} onCreate={create} live={!DEMO} recipients={agencyOptions} recipientsLoading={recipientsLoading} recipientsError={recipientsError} onReloadRecipients={()=>setRecipientsReload(v=>v+1)}/>}
     {notice&&<div className="toast"><CheckCircle2 size={18}/>{notice}<button aria-label="Đóng thông báo" onClick={()=>setNotice('')}><X size={15}/></button></div>}
   </div>;
 }
