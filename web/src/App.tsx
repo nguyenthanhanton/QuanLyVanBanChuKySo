@@ -13,6 +13,7 @@ import { demoDocuments, demoUsers } from './demo';
 import type { Actor, ChuyenPhat, SuKien, Trang, TrangThai, VanBan } from './types';
 import { formatDate, stageLabel, transferLabel } from './types';
 import SignaturePlacement, { type SignaturePosition } from './SignaturePlacement';
+import HoSoPage from './HoSoPage';
 
 const DEMO = import.meta.env.VITE_DEMO_MODE !== 'false';
 const APP_TITLE = 'Văn thư số';
@@ -1513,8 +1514,9 @@ export default function App() {
           {totalTransfer===0&&<EmptyView title="Chưa có lượt chuyển phát" message="Chỉ bản đã ký và phát hành mới được giao đến cơ quan nhận." icon={Network}/>}
           <Pagination total={visibleDocs.filter(d=>d.transfers.length>0).length} page={deliveryPage} onPage={setDeliveryPage}/></div></>}</>}
 
-      {page==='ho-so'&&<><div className="page-intro compact"><div><div className="overline">LƯU TRỮ ĐIỆN TỬ</div><h1>Hồ sơ lưu trữ</h1><p>Tập hợp văn bản và quản lý vị trí lưu hồ sơ giấy.</p></div></div>
-        <EmptyView title="Chưa có hồ sơ" message="Chức năng tạo, liên kết và đóng hồ sơ sẽ được triển khai trong giai đoạn tiếp theo." icon={Archive}/></>}
+      {page==='ho-so'&&(DEMO?<><div className="page-intro compact"><div><div className="overline">LƯU TRỮ ĐIỆN TỬ · 0.7</div><h1>Hồ sơ lưu trữ</h1></div></div>
+        <EmptyView title="Chế độ minh họa" message="Đăng nhập vào API thật để tạo và quản lý hồ sơ lưu trữ." icon={Archive}/></>
+        :<HoSoPage token={token} documents={visibleDocs} onOpen={openDoc}/>)}
 
       {page==='bao-cao'&&<><div className="page-intro compact"><div><div className="overline">THỐNG KÊ · 0.6.5</div><h1>Báo cáo hiệu suất</h1>
         <p>Chỉ tổng hợp tác vụ văn bản thường thuộc cơ quan; không tự động thay đổi tác vụ.</p></div>
