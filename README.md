@@ -1,4 +1,4 @@
-# QUẢN LÝ VĂN BẢN & CHỮ KÝ SỐ — BẢN NỀN TẢNG 0.2
+# QUẢN LÝ VĂN BẢN & CHỮ KÝ SỐ — BẢN NỀN TẢNG 0.4 (ĐANG KIỂM THỬ)
 
 Ứng dụng web quản lý văn bản đi/đến nhiều cơ quan, được dựng mới theo bộ tài liệu yêu cầu 01–08 cung cấp ngày 24/11/2026. Trọng tâm của bản đầu là **theo dõi hành trình văn bản và kiểm soát phạm vi dữ liệu**.
 
@@ -13,6 +13,8 @@ QuanLyVanBanChuKySo/
 │   ├── XacThuc.cs            Đăng nhập, PBKDF2, khóa sau 5 lần sai
 │   ├── Database.cs           Kết nối và kiểm tra quyền ở API
 │   ├── VanBanEndpoints.cs    Tạo/sửa văn bản, phiên bản, PDF, hành trình
+│   ├── TepVanBanEndpoints.cs Thêm/bỏ/thay tệp ở bản nháp; xem phiên bản
+│   ├── DichVuTepVanBan.cs   Kiểm tra và lưu Word/Excel/PDF, SHA-256
 │   ├── QuyTrinhEndpoints.cs  Trình duyệt, phê duyệt, cấp số, tiếp nhận
 │   ├── DichVuKyPdf.cs       Ký PDF/CMS, mã hóa PFX, xác minh từng chữ ký
 │   ├── KySoEndpoints.cs     Quản lý chứng thư, chuẩn bị và ký 3 cấp
@@ -21,7 +23,9 @@ QuanLyVanBanChuKySo/
 │   ├── 001_khoi_tao.sql      Tạo DB và lược đồ từ số 0
 │   ├── 002_du_lieu_mau.sql   3 cơ quan + 15 user dev/test
 │   ├── 003_kiem_tra.sql      Các truy vấn kiểm tra chỉ đọc
-│   └── 004_ky_so_phat_hanh.sql  Chứng thư và bản PDF ký bất biến
+│   ├── 004_ky_so_phat_hanh.sql  Chứng thư và bản PDF ký bất biến
+│   └── 005_tep_dinh_kem_phat_hanh.sql  Tệp phát hành và khóa tên văn bản
+│   └── 006_van_ban_chinh.sql  Phân biệt PDF chính với tệp đính kèm
 ├── web/                      React, TypeScript, Vite
 │   ├── src/App.tsx           Giao diện và các thao tác
 │   ├── src/demo.ts           Dữ liệu minh họa, KHÔNG phải chữ ký thật
@@ -30,6 +34,25 @@ QuanLyVanBanChuKySo/
 ```
 
 ## 2. Quy ước tên cơ sở dữ liệu
+
+### Nâng cấp 0.4 từ 0.3
+
+Chạy **chỉ** `database/006_van_ban_chinh.sql` trên database đã áp dụng đến migration `005`. Không chạy lại `001`, `002`, `004`, `005` khi không cần. Script thêm `TepDinhKem.LaVanBanChinh` và đánh dấu PDF đầu tiên của mỗi phiên bản cũ làm văn bản chính; lịch sử/tệp cũ được giữ lại.
+
+**Màn hình tạo văn bản có hai vùng độc lập:**
+
+- **Văn bản chính (bắt buộc):** một tệp PDF dùng làm nguồn ký số, có thể thay bằng PDF khác khi đang nháp.
+- **Tệp đính kèm (không bắt buộc):** Word, Excel, PDF khác; được gửi cùng phiên bản phát hành sang cơ quan nhận.
+
+Tab **Phiên bản** chia hai nhóm; có nút xem trước. PDF xem nguyên trang trên trình duyệt; `.docx`/`.xlsx` xem phần chữ/bảng tính được trích xuất ở chế độ chỉ đọc, không bảo đảm giống bố cục Word/Excel. Định dạng cũ `.doc`/`.xls` cần bộ chuyển đổi bổ sung, hiện có nút tải về. Không dùng dịch vụ xem tệp bên ngoài để tránh lộ tài liệu cơ quan.
+
+### Nâng cấp cơ sở dữ liệu đã chạy bản 0.2
+
+**Nếu bạn đã chạy `001`, `002`, `004` và đã có văn bản thật:** chỉ chạy file mới `database/005_tep_dinh_kem_phat_hanh.sql` trong SSMS, không chạy lại `001` hay seed `002`. Đảm bảo tên database đang chọn là `QuanLyVanBanChuKySo` và chạy toàn bộ script có `GO`. Script tạo bảng `BanPhatHanhTep` và trigger `KhoaTieuDeVanBan`, không xóa các văn bản cũ.
+
+Sau đó thay toàn bộ thư mục `backend` và `web` từ ZIP mới, giữ lại cấu hình cá nhân (`web/.env`, các khóa/biến môi trường, kho chứng thư). Khởi động lại `dotnet run` và `npm run dev`. Nếu chạy bản backend mới trước migration 005, thao tác phát hành/tải tệp sẽ báo không có bảng `dbo.BanPhatHanhTep`.
+
+**Quy tắc tệp:** mỗi bản nháp có 1–20 tệp PDF, Word, Excel (25 MB/tệp, 100 MB tổng). Có thể thêm, bỏ, thay tệp bằng cách tạo phiên bản mới khi ở `NHAP` hoặc `TRA_SUA`; **tiêu đề không thể thay đổi**. Bước ký số vẫn cần một PDF. Bản phát hành đã gửi mang danh sách tệp chốt tại thời điểm phát hành, không chịu ảnh hưởng nếu bản nháp khác được sửa sau này.
 
 - **Tên database:** `QuanLyVanBanChuKySo`.
 - **Tên bảng:** tiếng Việt không dấu, PascalCase, ví dụ `CoQuan`, `NguoiDung`, `VanBan`, `PhienBanVanBan`, `LuotChuyenVanBan`, `LichSuVanBan`.
@@ -93,6 +116,7 @@ sqlcmd -S . -E -C -i .\database\002_du_lieu_mau.sql
 
 ```powershell
 sqlcmd -S . -E -C -b -i .\database\004_ky_so_phat_hanh.sql
+sqlcmd -S . -E -C -b -i .\database\005_tep_dinh_kem_phat_hanh.sql
 sqlcmd -S . -E -C -b -i .\database\003_kiem_tra.sql
 ```
 
@@ -146,13 +170,14 @@ Vite chuyển các yêu cầu `/api` tới `http://127.0.0.1:5000` theo `vite.co
 
 ### Bước 4.5. Thao tác quy trình thật ở giao diện
 
-1. `chuyenvien_a` (hoặc tài khoản có quyền): tạo văn bản mới kèm PDF, **đánh dấu chọn đồng thời Cơ quan B và C** là nơi nhận. Backend lưu danh sách nhận dự kiến riêng từng cơ quan.
-2. Người soạn **Trình duyệt** → `truongphong_a` duyệt → `truongvanphong_a` kiểm tra thể thức → `lanhdao_a` duyệt → `vanthu_a` **Cấp số**.
-3. Trong chi tiết văn bản, tab **Chữ ký số**: các vai trò ký tạo/nhập chứng thư PFX/P12 riêng (chỉ chọn “thử nghiệm” nếu muốn tạo chứng thư tự ký), nhập mật khẩu tài khoản để xác nhận.
-4. `vanthu_a` chọn **Chuẩn bị PDF**. Backend chèn số/ký hiệu vào chân trang và đóng băng bản nội dung đã duyệt trước khi ký.
-5. `truongphong_a` **Ký nháy**, `lanhdao_a` **Lãnh đạo ký**, `vanthu_a` **Cơ quan ký**. Tất cả đều là chữ ký CMS nhúng trong PDF theo append mode, yêu cầu password và quyền đúng vai trò.
-6. `vanthu_a` **Phát hành**; vào **Giao nhận liên cơ quan** để **Gửi văn bản**. Chỉ giao bản PDF có 3 chữ ký đã được xác minh về mật mã.
-7. `vanthu_b` đăng nhập → **Văn bản đến** → tải PDF, **Tiếp nhận** hoặc **Từ chối** với lý do. Bên gửi xem kết quả tức thời ở **Hành trình văn bản**.
+1. `chuyenvien_a` (hoặc tài khoản có quyền): tạo văn bản mới kèm **nhiều tệp PDF, Word, Excel** (.pdf, .doc, .docx, .xls, .xlsx), **đánh dấu chọn đồng thời Cơ quan B và C**. Backend lưu danh sách nhận dự kiến riêng từng cơ quan.
+2. Trong trạng thái `NHAP`/`TRA_SUA`, mở văn bản → **Phiên bản** → đánh dấu bỏ tệp cũ, chọn tệp mới và **Lưu phiên bản mới**. Có thể sửa trích yếu; **tiêu đề đã tạo không được phép sửa** (API và trigger SQL đều chặn). Không xóa lịch sử các phiên bản cũ.
+3. Người soạn **Trình duyệt** → `truongphong_a` duyệt → `truongvanphong_a` kiểm tra thể thức → `lanhdao_a` duyệt → `vanthu_a` **Cấp số**.
+4. Trong chi tiết văn bản, tab **Chữ ký số**: các vai trò ký tạo/nhập chứng thư PFX/P12 riêng (chỉ chọn “thử nghiệm” nếu muốn tạo chứng thư tự ký), nhập mật khẩu tài khoản để xác nhận.
+5. `vanthu_a` chọn **Chuẩn bị PDF**. Phiên bản đem ký phải có ít nhất **một tệp PDF**; Word/Excel vẫn là tệp kèm và không được ký trực tiếp. Backend chèn số/ký hiệu vào chân trang và đóng băng bản nội dung đã duyệt trước khi ký.
+6. `truongphong_a` **Ký nháy**, `lanhdao_a` **Lãnh đạo ký**, `vanthu_a` **Cơ quan ký**. Tất cả đều là chữ ký CMS nhúng trong PDF theo append mode, yêu cầu password và quyền đúng vai trò.
+7. `vanthu_a` **Phát hành**; vào **Giao nhận liên cơ quan** để **Gửi văn bản**. Hệ thống đóng băng danh sách **toàn bộ tệp đính kèm của phiên bản phát hành** và cung cấp cả bản PDF có 3 chữ ký đã xác minh.
+8. `vanthu_b` đăng nhập → **Văn bản đến** → **Tệp đính kèm** để tải Word/Excel/PDF, **Tải PDF** để tải bản đã ký, rồi **Tiếp nhận** hoặc **Từ chối**. Bên gửi xem kết quả trong **Hành trình văn bản**.
 
 Các thao tác phát hành và gửi là **hai hành động khác nhau**. Tạo lượt chuyển (`CHO_GUI`) không đồng nghĩa đã gửi (`DA_GUI`); bên nhận chỉ xem khi đã gửi.
 

@@ -107,6 +107,30 @@ async function downloadApi(path:string,token:string,filename:string) {
   window.setTimeout(()=>URL.revokeObjectURL(url),30000);
 }
 
+function FilePreview({path,token,filename,onClose}:{path:string;token:string;filename:string;onClose:()=>void}) {
+  const [url,setUrl]=useState('');const [content,setContent]=useState('');const [error,setError]=useState('');
+  useEffect(()=>{
+    let alive=true;let temporary='';setError('');setUrl('');setContent('');
+    const openXml=/\.(docx|xlsx)$/i.test(filename);
+    fetch('/api/v1'+path+(openXml?'?preview=1':''),{headers:{Authorization:`Bearer ${token}`}}).then(async response=>{
+      if(!response.ok)throw new Error('Không có quyền xem hoặc tệp không còn nguyên vẹn.');
+      if(openXml){const plain=await response.text();if(alive)setContent(plain);return;}
+      const data=await response.blob();temporary=URL.createObjectURL(data);
+      if(alive)setUrl(temporary);else URL.revokeObjectURL(temporary);
+    }).catch(err=>{if(alive)setError((err as Error).message);});
+    return ()=>{alive=false;if(temporary)URL.revokeObjectURL(temporary);};
+  },[path,token]);
+  return <div className="preview-backdrop" onClick={onClose}><div className="preview-window" onClick={event=>event.stopPropagation()}>
+    <div className="preview-header"><strong><FileText size={18}/>{filename}</strong><button className="icon-button" onClick={onClose} aria-label="Đóng xem trước"><X size={20}/></button></div>
+    {error&&<div className="form-error">{error}</div>}
+    {!error&&!url&&<p className="subtle">Đang tải tệp an toàn...</p>}
+    {content&&<div className="preview-text"><p className="fine-note">Bản xem trước nội dung chữ/bảng tính; bố cục có thể khác Microsoft Office.</p><pre>{content}</pre></div>}
+    {url&&(filename.toLowerCase().endsWith('.pdf')?<iframe title={`Xem ${filename}`} src={url+'#toolbar=1'} className="preview-pdf"/>:
+      <div className="preview-other"><p>Định dạng Office cũ (.doc/.xls) cần bộ chuyển đổi riêng để xem trực tiếp đúng bố cục.</p>
+        <button className="primary" onClick={()=>downloadApi(path,token,filename).catch(err=>setError((err as Error).message))}>Tải tệp để xem<ArrowRight size={15}/></button></div>)}
+  </div></div>;
+}
+
 function adaptLiveDocument(d: Record<string,unknown>):VanBan {
   const s = (k:string) => String(field(d,k) ?? '');
   return {
@@ -292,6 +316,7 @@ function LiveDeliveries({token,direction,onUpdated}:{token:string;direction:'out
   const [busy,setBusy]=useState('');const [error,setError]=useState('');
   const [expanded,setExpanded]=useState('');
   const [attachments,setAttachments]=useState<Record<string,Record<string,unknown>[]>>({});
+  const [preview,setPreview]=useState<{path:string;name:string}|null>(null);
   const load=async()=>setRows(await requestApi(direction==='out'?'/deliveries':'/deliveries/inbox',token));
   useEffect(()=>{load().catch(err=>setError((err as Error).message));},[token,direction]);
   const perform=async(row:Record<string,unknown>,type:'deliver'|'accept'|'reject'|'pdf')=>{
@@ -342,6 +367,7 @@ function LiveDeliveries({token,direction,onUpdated}:{token:string;direction:'out
         {expanded===id&&<div className="attachment-list delivery-attachments">
           {(attachments[id]??[]).map(file=>{const fileId=String(field(file,'MaTep'));const filename=String(field(file,'TenTep'));
             return <div className="attachment-entry" key={fileId}><FileText size={16}/><span>{filename}</span>
+              <button className="secondary small" onClick={()=>setPreview({path:`/deliveries/${id}/attachments/${fileId}`,name:filename})}>Xem trước</button>
               <button className="secondary small" onClick={()=>downloadApi(`/deliveries/${id}/attachments/${fileId}`,token,filename).catch(err=>setError((err as Error).message))}>Tải về</button></div>;})}
           {(attachments[id]??[]).length===0&&<p className="subtle">Không có tệp đính kèm trong bản phát hành.</p>}
         </div>}
@@ -349,6 +375,7 @@ function LiveDeliveries({token,direction,onUpdated}:{token:string;direction:'out
       </div>;
     })}
     {rows.length===0&&<EmptyView icon={Inbox} title="Chưa có lượt chuyển" message={direction==='in'?'Cơ quan gửi chưa chuyển văn bản nào đến bạn.':'Hãy phát hành một văn bản đã ký để tạo lượt chuyển.'}/>}
+    {preview&&<FilePreview path={preview.path} filename={preview.name} token={token} onClose={()=>setPreview(null)}/>}
   </div>;
 }
 
@@ -358,6 +385,8 @@ function DraftAttachmentEditor({doc,actor,token,onUpdated}:{doc:VanBan;actor:Act
   const [excerpt,setExcerpt]=useState(doc.excerpt);
   const [removed,setRemoved]=useState<string[]>([]);
   const [newFiles,setNewFiles]=useState<File[]>([]);
+  const [newMain,setNewMain]=useState<File|null>(null);
+  const [preview,setPreview]=useState<{path:string;name:string}|null>(null);
   const [reason,setReason]=useState('');
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [message,setMessage]=useState('');
   const editable=isAllowed(actor,'documents.manage')&&['NHAP','TRA_SUA'].includes(doc.status)&&doc.creator===actor?.name;
@@ -366,15 +395,17 @@ function DraftAttachmentEditor({doc,actor,token,onUpdated}:{doc:VanBan;actor:Act
       requestApi(`/documents/${doc.id}`,token),requestApi(`/documents/${doc.id}/attachments`,token)
     ]);
     setAttachments(files);setVersionToken(String(field(details,'PhienBanDong')??''));
-    setExcerpt(String(field(details,'TrichYeu')??''));setRemoved([]);setNewFiles([]);
+    setExcerpt(String(field(details,'TrichYeu')??''));setRemoved([]);setNewFiles([]);setNewMain(null);
   };
   useEffect(()=>{load().catch(err=>setError((err as Error).message));},[doc.id,doc.version,token]);
   const save=async()=>{
     setBusy(true);setError('');setMessage('');
     try{
-      if(attachments.length-removed.length+newFiles.length===0)throw new Error('Phải giữ lại ít nhất một tệp.');
+      if(!newMain&&!attachments.some(f=>Boolean(field(f,'LaVanBanChinh'))&&!removed.includes(String(field(f,'MaTep')))))
+        throw new Error('Phải giữ lại hoặc chọn PDF văn bản chính.');
       const form=new FormData();form.set('phienBanDong',versionToken);form.set('trichYeu',excerpt);form.set('lyDo',reason);
       for(const id of removed)form.append('maTepLoaiBo',id);
+      if(newMain)form.set('tepVanBanChinh',newMain);
       for(const file of newFiles)form.append('tepDinhKem',file);
       await requestApi(`/documents/${doc.id}/draft-files`,token,{method:'POST',body:form});
       setReason('');await onUpdated();await load();setMessage('Đã lưu phiên bản mới. Tên văn bản vẫn giữ nguyên.');
@@ -383,18 +414,25 @@ function DraftAttachmentEditor({doc,actor,token,onUpdated}:{doc:VanBan;actor:Act
   return <div className="draft-files-editor">
     <h3>Tệp đính kèm hiện tại</h3>
     <p className="subtle">Word, Excel và PDF được giữ cùng văn bản. Tên văn bản «{doc.title}» không thể sửa sau khi tạo.</p>
-    <div className="attachment-list">
-      {attachments.map(file=>{const id=String(field(file,'MaTep'));const filename=String(field(file,'TenTep'));
-        return <div className="attachment-entry" key={id}><FileText size={17}/><span className={removed.includes(id)?'marked-removal':''}>{filename}</span>
+    {([true,false] as const).map(isMain=><div key={String(isMain)}>
+      <h4>{isMain?'Văn bản chính — PDF dùng để ký':'Tệp đính kèm — Word / Excel / PDF'}</h4>
+      <div className="attachment-list">
+      {attachments.filter(file=>Boolean(field(file,'LaVanBanChinh'))===isMain).map(file=>{const id=String(field(file,'MaTep'));const filename=String(field(file,'TenTep'));
+        return <div className="attachment-entry" key={id}><FileText size={17}/><span className={removed.includes(id)?'marked-removal':''}>{filename}{Boolean(field(file,'LaVanBanChinh'))?' · Văn bản chính':''}</span>
+          <button className="secondary small" onClick={()=>setPreview({path:`/documents/${doc.id}/files/${id}`,name:filename})}>Xem trước</button>
           <button className="secondary small" onClick={()=>downloadApi(`/documents/${doc.id}/files/${id}`,token,filename).catch(err=>setError((err as Error).message))}>Tải về</button>
           {editable&&<label className="remove-file"><input type="checkbox" checked={removed.includes(id)}
             onChange={e=>setRemoved(old=>e.target.checked?[...old,id]:old.filter(x=>x!==id))}/> Bỏ ở bản mới</label>}
         </div>;})}
-      {attachments.length===0&&<p className="subtle">Chưa có tệp đính kèm.</p>}
-    </div>
+      {!attachments.some(file=>Boolean(field(file,'LaVanBanChinh'))===isMain)&&<p className="subtle">Chưa có tệp ở mục này.</p>}
+      </div>
+    </div>)}
     {editable&&<div className="draft-edit-controls">
       <label>Trích yếu (có thể sửa)</label><textarea rows={3} value={excerpt} onChange={e=>setExcerpt(e.target.value)}/>
-      <label>Thêm hoặc thay tệp</label><input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx"
+      <label>Thay văn bản chính (PDF)</label><input type="file" accept=".pdf,application/pdf"
+        onChange={e=>setNewMain(e.target.files?.[0]??null)}/>
+      {newMain&&<p className="subtle">PDF chính mới: {newMain.name}. Hãy đánh dấu bỏ PDF chính cũ.</p>}
+      <label>Thêm tệp đính kèm (Word / Excel / PDF)</label><input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx"
         onChange={e=>setNewFiles(Array.from(e.target.files??[]))}/>
       {newFiles.length>0&&<p className="subtle">Tệp mới: {newFiles.map(f=>f.name).join(', ')}</p>}
       <label>Lý do cập nhật</label><input value={reason} maxLength={1000} onChange={e=>setReason(e.target.value)} placeholder="Ví dụ: thay bảng tính dự toán"/>
@@ -403,6 +441,7 @@ function DraftAttachmentEditor({doc,actor,token,onUpdated}:{doc:VanBan;actor:Act
     </div>}
     {!editable&&<p className="fine-note">Chỉ người tạo được thay đổi tệp khi văn bản còn ở trạng thái nháp hoặc trả sửa.</p>}
     {error&&<div className="form-error">{error}</div>}{message&&<p className="success-note">{message}</p>}
+    {preview&&<FilePreview path={preview.path} filename={preview.name} token={token} onClose={()=>setPreview(null)}/>}
   </div>;
 }
 
@@ -462,14 +501,16 @@ function DocumentDetails({doc,onClose,onAction,allowed,canDecide,liveTimeline,to
   </div>;
 }
 
-function NewDocument({onClose,onCreate,live,recipients}:{onClose:()=>void,onCreate:(input:{title:string;excerpt:string;to:string[];urgency:VanBan['urgency'];files:File[]})=>Promise<void>,live:boolean,recipients:{value:string;label:string}[]}) {
+function NewDocument({onClose,onCreate,live,recipients}:{onClose:()=>void,onCreate:(input:{title:string;excerpt:string;to:string[];urgency:VanBan['urgency'];mainFile:File;files:File[]})=>Promise<void>,live:boolean,recipients:{value:string;label:string}[]}) {
   const [title,setTitle]=useState('');const [excerpt,setExcerpt]=useState('');
   const [to,setTo]=useState<string[]>([]);const [urgency,setUrgency]=useState<VanBan['urgency']>('THUONG');
+  const [mainFile,setMainFile]=useState<File|null>(null);
   const [files,setFiles]=useState<File[]>([]);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
   const submit=async(e:FormEvent)=>{e.preventDefault();setBusy(true);setError('');
     try{if(to.length===0)throw new Error('Chọn ít nhất một cơ quan nhận.');
-      if(live&&files.length===0)throw new Error('Chọn ít nhất một tệp đính kèm.');
-      await onCreate({title,excerpt,to,urgency,files});onClose();}catch(err){setError((err as Error).message);}finally{setBusy(false);}};
+      if(!mainFile)throw new Error('Chọn văn bản chính dạng PDF để ký số.');
+      if(!mainFile.name.toLowerCase().endsWith('.pdf'))throw new Error('Văn bản chính phải là PDF.');
+      await onCreate({title,excerpt,to,urgency,mainFile,files});onClose();}catch(err){setError((err as Error).message);}finally{setBusy(false);}};
   return <div className="modal-backdrop" onClick={onClose}><form className="create-modal" onClick={e=>e.stopPropagation()} onSubmit={submit}>
     <div className="modal-header"><div><div className="eyebrow">VĂN BẢN ĐI</div><h2>Tạo văn bản mới</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={20}/></button></div>
     <div className="modal-content"><label>Tiêu đề văn bản <span>*</span></label><input required minLength={3} maxLength={300} placeholder="Nhập tên văn bản..." value={title} onChange={e=>setTitle(e.target.value)}/>
@@ -480,10 +521,13 @@ function NewDocument({onClose,onCreate,live,recipients}:{onClose:()=>void,onCrea
         {recipients.length===0&&<span className="subtle">Chưa có cơ quan nhận được cấu hình.</span>}
         </div></div>
         <div><label>Độ khẩn</label><select value={urgency} onChange={e=>setUrgency(e.target.value as VanBan['urgency'])}><option value="THUONG">Thường</option><option value="KHAN">Khẩn</option><option value="HOA_TOC">Hỏa tốc</option></select></div></div>
-      <label>Tệp đính kèm (PDF / Word / Excel) {live&&<span>*</span>}</label>
-      <label className="file-upload"><CloudUpload size={22}/><span>{files.length?`${files.length} tệp: ${files.map(f=>f.name).join(', ')}`:'Chọn một hoặc nhiều tệp đính kèm'}</span><small>Tối đa 20 tệp, 25 MB/tệp</small>
-        <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx" required={live} onChange={e=>setFiles(Array.from(e.target.files??[]))}/></label>
-      <p className="fine-note">Trong lúc soạn có thể thêm, thay hoặc bỏ tệp. Tiêu đề sau khi tạo sẽ không thể đổi. Để ký số, phiên bản dùng ký phải có tệp PDF.</p>
+      <div className="upload-part"><label>1. Văn bản chính — PDF dùng để ký <span>*</span></label>
+        <label className="file-upload"><CloudUpload size={22}/><span>{mainFile?.name??'Chọn một tệp PDF chính'}</span><small>Bản này sẽ được phê duyệt và ký số</small>
+          <input type="file" accept=".pdf,application/pdf" required onChange={e=>setMainFile(e.target.files?.[0]??null)}/></label></div>
+      <div className="upload-part"><label>2. Tệp đính kèm — Word / Excel / PDF (không bắt buộc)</label>
+        <label className="file-upload"><CloudUpload size={22}/><span>{files.length?`${files.length} tệp: ${files.map(f=>f.name).join(', ')}`:'Chọn các tệp đi kèm văn bản chính'}</span><small>Tối đa 20 tệp tính cả PDF chính; 25 MB/tệp</small>
+          <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx" onChange={e=>setFiles(Array.from(e.target.files??[]))}/></label></div>
+      <p className="fine-note">Trong lúc soạn có thể thay PDF chính hoặc thêm/bỏ tệp đính kèm. Tiêu đề đã tạo không được đổi.</p>
       {error&&<div className="form-error">{error}</div>}
     </div><div className="modal-footer"><button type="button" className="secondary" onClick={onClose}>Hủy</button><button className="primary" disabled={busy}>{busy?'Đang lưu...':'Tạo bản dự thảo'}<ArrowRight size={17}/></button></div>
   </form></div>;
@@ -606,7 +650,7 @@ export default function App() {
 
   const logout=()=>{setActor(null);setToken('');setSelected(null);setQuery('');setProfileMenu(false);setError('');};
   const go=(next:Trang)=>{if(!menuItems.find(i=>i.id===next))return;setPage(next);setSelected(null);setFilter('ALL');setQuery('');setMenuOpen(false);};
-  const create=async(input:{title:string;excerpt:string;to:string[];urgency:VanBan['urgency'];files:File[]})=>{
+  const create=async(input:{title:string;excerpt:string;to:string[];urgency:VanBan['urgency'];mainFile:File;files:File[]})=>{
     if(!actor)return;
     if(DEMO){
       const now=new Date().toISOString();const number=Math.floor(Math.random()*9000+1000);
@@ -619,6 +663,7 @@ export default function App() {
     const form=new FormData();form.set('tieuDe',input.title);form.set('trichYeu',input.excerpt);
     form.set('doMat','THUONG');form.set('doKhan',input.urgency);
     for(const recipient of input.to)form.append('maCoQuanNhan',recipient);
+    form.set('tepVanBanChinh',input.mainFile);
     for(const file of input.files)form.append('tepDinhKem',file);
     await requestApi('/documents',token,{method:'POST',body:form});
     await refresh(token);setPage('van-ban-di');setNotice('Đã tạo văn bản và lưu các tệp đính kèm trên máy chủ.');

@@ -3,12 +3,19 @@ web/node_modules/
 web/dist/
 web/.env
 web/.env.local
+web/.env.*.local
+.env
+.env.*
+!.env.example
 
 # .NET
 **/bin/
 **/obj/
 *.user
 *.suo
+backend/appsettings.Development.json
+backend/appsettings.Production.json
+backend/appsettings.*.local.json
 
 # Private keys, local records and uploaded content
 *.pfx
@@ -20,6 +27,17 @@ web/.env.local
 storage/
 secrets/
 keyring/
+*.snk
+*.cer
+*.crt
+*.p7b
+*.p7m
+*.p7s
+*.log
+*.bak
+*.bacpac
+*.mdf
+*.ldf
 
 # System/editor
 .DS_Store

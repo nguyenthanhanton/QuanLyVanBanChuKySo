@@ -272,6 +272,12 @@ public static class PhatHanhEndpoints
                 await DichVuKyPdf.Bam(file.DuongDanLuuTru)!=file.MaBamSha256)
                 return Results.Conflict(new{message="Tệp đính kèm phát hành không toàn vẹn."});
             http.Response.Headers["X-Content-Type-Options"]="nosniff";
+            if(http.Request.Query.ContainsKey("preview")){
+                try {var text=DichVuTepVanBan.XemTruocOffice(file.DuongDanLuuTru);
+                    if(text==null)return Results.StatusCode(415);
+                    return Results.Text(text,"text/plain; charset=utf-8");}
+                catch(InvalidDataException){return Results.BadRequest(new{message="Tệp Office bị lỗi định dạng."});}
+            }
             return Results.File(file.DuongDanLuuTru,file.LoaiNoiDung,file.TenTep);
         }).RequireAuthorization();
 

@@ -183,6 +183,7 @@ public static class KySoEndpoints
                 SELECT TOP 1 f.DuongDanLuuTru,f.MaBamSha256 FROM dbo.TepDinhKem f
                 JOIN dbo.PhienBanVanBan p ON p.MaPhienBan=f.MaPhienBan
                 WHERE p.MaVanBan=@id AND p.SoPhienBan=@version AND f.LoaiNoiDung='application/pdf'
+                  AND f.LaVanBanChinh=1
                 ORDER BY f.MaTep",new{id,version=doc.PhienBanHienTai},tx);
             if(source==null || !File.Exists(source.DuongDanLuuTru)){
                 tx.Rollback();return Results.Conflict(new{message="Không tìm thấy bản PDF được phê duyệt."});

@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Xml.Linq;
 
 // Only non-executable, non-macro document formats. Validate the file header,
 // never trust the MIME type claimed by the browser.
@@ -72,5 +73,47 @@ public static class DichVuTepVanBan
             if(issue!=null)return $"{Path.GetFileName(f.FileName)}: {issue}";
         }
         return null;
+    }
+
+    // Read-only text preview for Open XML. No macros/scripts are executed.
+    // This is a text/table preview, not a page-perfect Office renderer.
+    public static string? XemTruocOffice(string path)
+    {
+        var ext=Path.GetExtension(path).ToLowerInvariant();
+        if(ext is not (".docx" or ".xlsx"))return null;
+        using var archive=ZipFile.OpenRead(path);
+        if(ext==".docx"){
+            var entry=archive.GetEntry("word/document.xml");
+            if(entry==null)return null;
+            using var content=entry.Open();
+            var xml=XDocument.Load(content);
+            XNamespace w="http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+            var paragraphs=xml.Descendants(w+"p").Take(10000).Select(p=>
+                string.Concat(p.Descendants(w+"t").Select(t=>t.Value)));
+            var text=string.Join("\n",paragraphs);
+            return text[..Math.Min(2_000_000,text.Length)];
+        }
+        var shared=archive.GetEntry("xl/sharedStrings.xml");
+        var strings=new List<string>();
+        XNamespace x="http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        if(shared!=null){using var s=shared.Open();var xml=XDocument.Load(s);
+            strings=xml.Descendants(x+"si").Select(si=>string.Concat(si.Descendants(x+"t").Select(t=>t.Value))).ToList();}
+        var builder=new System.Text.StringBuilder();
+        foreach(var sheet in archive.Entries.Where(e=>e.FullName.StartsWith("xl/worksheets/sheet",StringComparison.OrdinalIgnoreCase)
+            && e.FullName.EndsWith(".xml",StringComparison.OrdinalIgnoreCase)).Take(30)){
+            builder.AppendLine($"=== {sheet.Name} ===");
+            using var data=sheet.Open();var xml=XDocument.Load(data);
+            foreach(var row in xml.Descendants(x+"row").Take(10000)){
+                var cells=row.Elements(x+"c").Select(c=>{
+                    var value=c.Element(x+"v")?.Value??c.Descendants(x+"t").FirstOrDefault()?.Value??"";
+                    return c.Attribute("t")?.Value=="s"&&int.TryParse(value,out var idx)&&idx>=0&&idx<strings.Count
+                        ?strings[idx]:value;
+                });
+                builder.AppendLine(string.Join("\t",cells));
+                if(builder.Length>2_000_000)break;
+            }
+            if(builder.Length>2_000_000)break;
+        }
+        return builder.ToString()[..Math.Min(2_000_000,builder.Length)];
     }
 }

@@ -8,6 +8,7 @@ public sealed class VanBanBanThao {
     public int PhienBanHienTai {get;set;}
     public byte[] PhienBanDong {get;set;}=[];
 }
+public sealed class TepBanThao {public Guid MaTep {get;set;} public bool LaVanBanChinh {get;set;}}
 
 public static class TepVanBanEndpoints
 {
@@ -20,7 +21,7 @@ public static class TepVanBanEndpoints
             if(!await VanBanEndpoints.CoQuyenXem(db,actor!,id))return Results.NotFound();
             using var cn=db.Open();
             var files=await cn.QueryAsync(@"
-                SELECT f.MaTep,f.TenTep,f.LoaiNoiDung,f.KichThuoc,f.MaBamSha256,p.SoPhienBan
+                SELECT f.MaTep,f.TenTep,f.LoaiNoiDung,f.KichThuoc,f.MaBamSha256,f.LaVanBanChinh,p.SoPhienBan
                 FROM dbo.TepDinhKem f
                 JOIN dbo.PhienBanVanBan p ON p.MaPhienBan=f.MaPhienBan
                 JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
@@ -38,7 +39,11 @@ public static class TepVanBanEndpoints
             if(actor!.MaCoQuan is null)return Results.Forbid();
             if(!http.Request.HasFormContentType)return Results.BadRequest(new{message="Cần multipart/form-data."});
             var form=await http.Request.ReadFormAsync();
-            var files=form.Files.GetFiles("tepDinhKem").ToArray();
+            var mainFile=form.Files.GetFile("tepVanBanChinh");
+            var files=(mainFile==null?Array.Empty<IFormFile>():new[]{mainFile})
+                .Concat(form.Files.GetFiles("tepDinhKem")).ToArray();
+            if(mainFile!=null&&!Path.GetExtension(mainFile.FileName).Equals(".pdf",StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest(new{message="Văn bản chính phải là PDF."});
             var bad=await DichVuTepVanBan.KiemTraDanhSach(files);
             if(bad!=null)return Results.BadRequest(new{message=bad});
             var removeRaw=form["maTepLoaiBo"].ToString();
@@ -70,15 +75,18 @@ public static class TepVanBanEndpoints
             if(!doc.PhienBanDong.SequenceEqual(expected)){
                 tx.Rollback();return Results.Conflict(new{message="Phiên bản đã thay đổi. Tải lại trước khi sửa."});
             }
-            var existing=(await cn.QueryAsync<Guid>(@"
-                SELECT f.MaTep FROM dbo.TepDinhKem f
+            var existing=(await cn.QueryAsync<TepBanThao>(@"
+                SELECT f.MaTep,f.LaVanBanChinh FROM dbo.TepDinhKem f
                 JOIN dbo.PhienBanVanBan p ON p.MaPhienBan=f.MaPhienBan
                 WHERE p.MaVanBan=@id AND p.SoPhienBan=@version",
                 new{id,version=doc.PhienBanHienTai},tx)).ToArray();
-            if(removed.Except(existing).Any()){
+            if(removed.Except(existing.Select(f=>f.MaTep)).Any()){
                 tx.Rollback();return Results.BadRequest(new{message="Có tệp loại bỏ không thuộc phiên bản hiện tại."});
             }
             var kept=existing.Length-removed.Length;
+            var mainKept=existing.Any(f=>f.LaVanBanChinh&&!removed.Contains(f.MaTep));
+            if(mainFile!=null && mainKept){tx.Rollback();return Results.BadRequest(new{message="Hãy đánh dấu bỏ PDF chính cũ trước khi thay PDF chính mới."});}
+            if(mainFile==null && !mainKept){tx.Rollback();return Results.BadRequest(new{message="Phiên bản phải có PDF chính để ký số."});}
             if(kept+files.Length is < 1 or > DichVuTepVanBan.GioiHanTep){
                 tx.Rollback();return Results.BadRequest(new{message="Phiên bản phải có 1–20 tệp đính kèm."});
             }
@@ -94,17 +102,18 @@ public static class TepVanBanEndpoints
                     new{versionId,id,nextVersion,title=doc.TieuDe,notes,user=actor.MaNguoiDung,
                         reason=string.IsNullOrWhiteSpace(reason)?"Cập nhật tệp đính kèm/trích yếu":reason},tx);
                 await cn.ExecuteAsync(@"
-                    INSERT dbo.TepDinhKem(MaCoQuan,MaPhienBan,TenTep,LoaiNoiDung,KichThuoc,DuongDanLuuTru,MaBamSha256)
-                    SELECT f.MaCoQuan,@versionId,f.TenTep,f.LoaiNoiDung,f.KichThuoc,f.DuongDanLuuTru,f.MaBamSha256
+                    INSERT dbo.TepDinhKem(MaCoQuan,MaPhienBan,TenTep,LoaiNoiDung,KichThuoc,DuongDanLuuTru,MaBamSha256,LaVanBanChinh)
+                    SELECT f.MaCoQuan,@versionId,f.TenTep,f.LoaiNoiDung,f.KichThuoc,f.DuongDanLuuTru,f.MaBamSha256,f.LaVanBanChinh
                     FROM dbo.TepDinhKem f JOIN dbo.PhienBanVanBan p ON p.MaPhienBan=f.MaPhienBan
                     WHERE p.MaVanBan=@id AND p.SoPhienBan=@previous
                       AND f.MaTep NOT IN @removed",
                     new{versionId,id,previous=doc.PhienBanHienTai,removed},tx);
                 foreach(var item in saved)await cn.ExecuteAsync(@"
-                    INSERT dbo.TepDinhKem(MaTep,MaCoQuan,MaPhienBan,TenTep,LoaiNoiDung,KichThuoc,DuongDanLuuTru,MaBamSha256)
-                    VALUES(@fileId,@agency,@versionId,@filename,@mime,@length,@path,@sha)",
+                    INSERT dbo.TepDinhKem(MaTep,MaCoQuan,MaPhienBan,TenTep,LoaiNoiDung,KichThuoc,DuongDanLuuTru,MaBamSha256,LaVanBanChinh)
+                    VALUES(@fileId,@agency,@versionId,@filename,@mime,@length,@path,@sha,@isMain)",
                     new{fileId=item.MaTep,agency=actor.MaCoQuan,versionId,filename=item.TenTep,
-                        mime=item.LoaiNoiDung,length=item.KichThuoc,path=item.DuongDanLuuTru,sha=item.MaBamSha256},tx);
+                        mime=item.LoaiNoiDung,length=item.KichThuoc,path=item.DuongDanLuuTru,sha=item.MaBamSha256,
+                        isMain=mainFile!=null&&item.MaTep==saved[0].MaTep},tx);
                 var rows=await cn.ExecuteAsync(@"
                     UPDATE dbo.VanBan SET TrichYeu=@notes,PhienBanHienTai=@nextVersion,TrangThai='NHAP',
                         ThoiDiemCapNhat=SYSUTCDATETIME()
