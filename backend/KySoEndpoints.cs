@@ -394,9 +394,18 @@ public static class KySoEndpoints
                 }
                 if(request.LoaiChuKy=="KY_LANH_DAO")
                     stage=(doc.SoBuocKy-1,"LANH_DAO","PHE_DUYET_LANH_DAO");
-                if((request.LoaiChuKy=="KY_NHAY" && doc.MaNguoiKyNhay!=actor.MaNguoiDung) ||
-                   (request.LoaiChuKy=="KY_LANH_DAO" && doc.MaNguoiKyLanhDao!=actor.MaNguoiDung)){
-                    tx.Rollback();return Results.Forbid();
+                var selected=request.LoaiChuKy=="KY_NHAY"?doc.MaNguoiKyNhay:doc.MaNguoiKyLanhDao;
+                if(selected!=actor.MaNguoiDung){
+                    var proxyTask=await cn.QueryFirstOrDefaultAsync<Guid?>(@"
+                        SELECT TOP 1 t.MaTacVu FROM dbo.TacVuXuLy t
+                        WHERE t.MaVanBan=@id AND t.MaCoQuan=@agency
+                          AND t.MaNguoiDuocGiao=@selected AND t.Buoc=@step
+                          AND t.PhienBanDuocDuyet=@version AND t.TrangThai='CHO_XU_LY'",
+                        new{id,agency=actor.MaCoQuan,selected,step=stage.TaskStep,version=doc.PhienBanHienTai},tx);
+                    if(proxyTask==null || !await UyQuyenKyEndpoints.DangHieuLuc(cn,tx,proxyTask.Value,
+                        actor.MaCoQuan.Value,actor.MaNguoiDung,selected??0)){
+                        tx.Rollback();return Results.Forbid();
+                    }
                 }
             }
             var command="KY_"+stage.Order;
@@ -416,9 +425,14 @@ public static class KySoEndpoints
                 tx.Rollback();return Results.Conflict(new{message="Văn bản phải ở bước chờ duyệt để ký theo cấp."});
             }
             var assigned=await cn.ExecuteScalarAsync<int>(@"
-                SELECT COUNT(1) FROM dbo.TacVuXuLy WITH(UPDLOCK,HOLDLOCK)
-                WHERE MaVanBan=@id AND MaCoQuan=@agency AND MaNguoiDuocGiao=@user
-                  AND Buoc=@taskStep AND PhienBanDuocDuyet=@version AND TrangThai='CHO_XU_LY'",
+                SELECT COUNT(1) FROM dbo.TacVuXuLy t WITH(UPDLOCK,HOLDLOCK)
+                WHERE t.MaVanBan=@id AND t.MaCoQuan=@agency
+                  AND (t.MaNguoiDuocGiao=@user OR EXISTS(
+                    SELECT 1 FROM dbo.UyQuyenKyTacVu q WHERE q.MaTacVu=t.MaTacVu
+                      AND q.MaCoQuan=@agency AND q.MaNguoiGoc=t.MaNguoiDuocGiao
+                      AND q.MaNguoiDuocUyQuyen=@user AND q.DaThuHoi=0
+                      AND q.HieuLucTu<=SYSUTCDATETIME() AND q.HieuLucDen>SYSUTCDATETIME()))
+                  AND t.Buoc=@taskStep AND t.PhienBanDuocDuyet=@version AND t.TrangThai='CHO_XU_LY'",
                 new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,
                     taskStep=stage.TaskStep,version=doc.PhienBanHienTai},tx);
             if(assigned!=1){tx.Rollback();return Results.Forbid();}

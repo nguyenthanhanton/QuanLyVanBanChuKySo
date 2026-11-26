@@ -6,6 +6,7 @@ public sealed record CapSoVanBan(Guid MaVanBan, Guid MaYeuCau, string KyHieu);
 public sealed record TraLoiGiaoNhan(string? LyDo, Guid MaYeuCau);
 public sealed class TacVuDuocGiao {
     public Guid MaVanBan { get; set; }
+    public int MaNguoiDuocGiao { get; set; }
     public string Buoc { get; set; } = "";
     public int PhienBanDuocDuyet { get; set; }
     public string TrangThai { get; set; } = "";
@@ -112,7 +113,18 @@ public static class QuyTrinhEndpoints
                 SELECT t.MaTacVu,t.Buoc,t.TrangThai,t.HanXuLy,t.ThoiDiemTao,
                        v.MaVanBan,v.MaNoiBo,v.TieuDe,v.DoKhan,v.DoMat
                 FROM dbo.TacVuXuLy t JOIN dbo.VanBan v ON v.MaVanBan=t.MaVanBan
-                WHERE t.MaCoQuan=@agency AND t.MaNguoiDuocGiao=@user AND t.TrangThai='CHO_XU_LY'
+                WHERE t.MaCoQuan=@agency AND t.TrangThai='CHO_XU_LY'
+                  AND (t.MaNguoiDuocGiao=@user OR EXISTS(
+                    SELECT 1 FROM dbo.UyQuyenKyTacVu q
+                    WHERE q.MaTacVu=t.MaTacVu AND q.MaCoQuan=@agency
+                      AND q.MaNguoiDuocUyQuyen=@user AND q.DaThuHoi=0
+                      AND ((q.HieuLucTu<=SYSUTCDATETIME() AND q.HieuLucDen>SYSUTCDATETIME())
+                        OR EXISTS(SELECT 1 FROM dbo.ChuKySo s
+                          WHERE s.MaVanBan=t.MaVanBan AND s.SoPhienBan=t.PhienBanDuocDuyet
+                            AND s.MaNguoiKy=@user AND s.ThoiDiemKy>=q.HieuLucTu
+                            AND s.ThoiDiemKy<=q.HieuLucDen
+                            AND ((t.Buoc='KIEM_TRA_NOI_DUNG' AND s.LoaiChuKy='KY_NHAY')
+                              OR (t.Buoc='PHE_DUYET_LANH_DAO' AND s.LoaiChuKy='KY_LANH_DAO')))))
                 ORDER BY t.HanXuLy,t.ThoiDiemTao",
                 new{agency=actor!.MaCoQuan,user=actor.MaNguoiDung});
             return Results.Ok(jobs);
@@ -235,11 +247,15 @@ public static class QuyTrinhEndpoints
             using var cn=db.Open();await cn.OpenAsync();
             using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
             var task=await cn.QuerySingleOrDefaultAsync<TacVuDuocGiao>(@"
-                SELECT MaVanBan,Buoc,PhienBanDuocDuyet,TrangThai
+                SELECT MaVanBan,MaNguoiDuocGiao,Buoc,PhienBanDuocDuyet,TrangThai
                 FROM dbo.TacVuXuLy WITH(UPDLOCK)
-                WHERE MaTacVu=@taskId AND MaCoQuan=@agency AND MaNguoiDuocGiao=@actor",
+                WHERE MaTacVu=@taskId AND MaCoQuan=@agency",
                 new{taskId,agency=actor.MaCoQuan,actor=actor.MaNguoiDung},tx);
             if(task==null){tx.Rollback();return Results.NotFound();}
+            if(!await UyQuyenKyEndpoints.LaNguoiXuLy(cn,tx,taskId,actor.MaCoQuan.Value,
+                actor.MaNguoiDung,task.MaNguoiDuocGiao)){
+                tx.Rollback();return Results.Forbid();
+            }
             if(task.TrangThai!="CHO_XU_LY"){
                 tx.Rollback();return Results.Conflict(new{message="Công việc đã được xử lý."});
             }

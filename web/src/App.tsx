@@ -36,6 +36,7 @@ const navigation: Navigation = [
   { group: 'QUẢN TRỊ', items: [
     { id:'quan-tri',label:'Quản trị tài khoản',icon:Settings2,permission:'users.manage' },
     { id:'co-cau',label:'Cơ cấu phòng ban',icon:Building2,permission:'departments.manage' },
+    { id:'uy-quyen',label:'Ủy quyền ký thay',icon:ShieldCheck,permission:'permissions.manage' },
   ] },
 ];
 
@@ -43,7 +44,7 @@ const names: Record<Trang, string> = {
   'tong-quan':'Tổng quan', 'van-ban-di':'Quản lý văn bản đi', 'van-ban-den':'Quản lý văn bản đến',
   'cong-viec':'Việc cần xử lý', 'hanh-trinh':'Hành trình văn bản', 'giao-nhan':'Theo dõi giao nhận',
   'ho-so':'Hồ sơ lưu trữ', 'bao-cao':'Báo cáo thống kê', 'quan-tri':'Quản trị tài khoản',
-  'co-cau':'Quản lý cơ cấu phòng ban'
+  'co-cau':'Quản lý cơ cấu phòng ban', 'uy-quyen':'Ủy quyền ký thay'
 };
 
 function defaultDocs(): VanBan[] {
@@ -558,6 +559,80 @@ type SignerOption={MaNguoiDung:number;HoTen:string;ChucVu:string;TenPhongBan:str
 type AdminUser={MaNguoiDung:number;TenDangNhap:string;HoTen:string;TenPhongBan:string;
   MaPhongBan:number;MaVaiTro:string;ChucVu:string;DangHoatDong:boolean};
 type AdminOption={MaDinhDanh?:string;TenVaiTro?:string;MaPhongBan?:number;TenPhongBan?:string;ThuTuHienThi?:number};
+type SigningDelegationTask={MaTacVu:string;MaVanBan:string;Buoc:string;TieuDe:string;
+  NguoiDuocGiao:string;MaNguoiDuocGiao:number;MaNguoiDuocUyQuyen:number|null;
+  HieuLucDen:string|null;DaThuHoi:boolean};
+type SigningCandidate={MaNguoiDung:number;HoTen:string};
+function SigningDelegationAdministration({token}:{token:string}){
+  const [tasks,setTasks]=useState<SigningDelegationTask[]>([]);
+  const [task,setTask]=useState('');const [candidates,setCandidates]=useState<SigningCandidate[]>([]);
+  const [delegateId,setDelegateId]=useState(0);const [hours,setHours]=useState(48);
+  const [reason,setReason]=useState('');const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');const [message,setMessage]=useState('');
+  const load=async()=>{
+    const raw=await requestApi('/admin/signing-delegations/tasks',token) as Record<string,unknown>[];
+    const rows=raw.map(x=>({MaTacVu:String(field(x,'MaTacVu')),MaVanBan:String(field(x,'MaVanBan')),
+      Buoc:String(field(x,'Buoc')),TieuDe:String(field(x,'TieuDe')),
+      NguoiDuocGiao:String(field(x,'NguoiDuocGiao')),MaNguoiDuocGiao:Number(field(x,'MaNguoiDuocGiao')),
+      MaNguoiDuocUyQuyen:field(x,'MaNguoiDuocUyQuyen')==null?null:Number(field(x,'MaNguoiDuocUyQuyen')),
+      HieuLucDen:field(x,'HieuLucDen')==null?null:String(field(x,'HieuLucDen')),
+      DaThuHoi:Boolean(field(x,'DaThuHoi'))}));
+    setTasks(rows);setTask(current=>rows.some(t=>t.MaTacVu===current)?current:rows[0]?.MaTacVu??'');
+  };
+  useEffect(()=>{load().catch(e=>setError((e as Error).message));},[token]);
+  useEffect(()=>{
+    if(!task){setCandidates([]);setDelegateId(0);return;}
+    let active=true;
+    requestApi(`/admin/signing-delegations/tasks/${task}/candidates`,token).then((raw:Record<string,unknown>[])=>{
+      if(!active)return;
+      const list=raw.map(x=>({MaNguoiDung:Number(field(x,'MaNguoiDung')),HoTen:String(field(x,'HoTen'))}));
+      setCandidates(list);setDelegateId(current=>list.some(x=>x.MaNguoiDung===current)?current:list[0]?.MaNguoiDung??0);
+    }).catch(e=>{if(active)setError((e as Error).message);});
+    return()=>{active=false;};
+  },[token,task]);
+  const current=tasks.find(t=>t.MaTacVu===task);
+  const active=!!current?.MaNguoiDuocUyQuyen&&!current.DaThuHoi&&!!current.HieuLucDen&&
+    new Date(current.HieuLucDen).getTime()>Date.now();
+  const submit=async(action:'grant'|'revoke')=>{
+    if(!current)return;
+    setBusy(true);setError('');setMessage('');
+    try{
+      if(action==='grant')await requestApi('/admin/signing-delegations',token,{method:'POST',body:JSON.stringify({
+        maTacVu:task,maNguoiDuocUyQuyen:delegateId,soGioHieuLuc:hours,lyDo:reason})});
+      else await requestApi(`/admin/signing-delegations/${task}/revoke`,token,{method:'POST'});
+      await load();setMessage(action==='grant'?'Đã cấp ủy quyền cho tác vụ ký.':'Đã thu hồi ủy quyền.');
+    }catch(e){setError((e as Error).message);}finally{setBusy(false);}
+  };
+  return <section className="panel admin-signing-delegation">
+    <div className="panel-head"><div><h3>Ủy quyền ký thay có thời hạn</h3>
+      <p>Chỉ ủy quyền một tác vụ đang chờ ký, cho người đủ chức vụ cùng phòng; chữ ký PDF mang tên người ký thực tế.</p>
+    </div><button className="secondary small" disabled={busy} onClick={()=>load().catch(e=>setError((e as Error).message))}>
+      <RefreshCw size={15}/> Tải lại</button></div>
+    <div className="admin-delegation-form">
+      <label>Tác vụ cần ủy quyền<select value={task} onChange={e=>setTask(e.target.value)} disabled={busy}>
+        {tasks.length===0&&<option value="">Không có tác vụ đang chờ</option>}
+        {tasks.map(t=><option key={t.MaTacVu} value={t.MaTacVu}>{t.TieuDe} — {t.Buoc==='KIEM_TRA_NOI_DUNG'?'Ký nháy':'Lãnh đạo ký'}</option>)}
+      </select></label>
+      {current&&<div className="admin-delegation-summary">
+        <strong>{current.TieuDe}</strong><span>Người được giao ban đầu: {current.NguoiDuocGiao}</span>
+        {current.MaNguoiDuocUyQuyen!=null&&<span>Đã ủy quyền cho mã người dùng {current.MaNguoiDuocUyQuyen} — {current.DaThuHoi?'Đã thu hồi':active?'Đang hiệu lực':'Hết hạn'}</span>}
+      </div>}
+      {current&&!current.MaNguoiDuocUyQuyen&&<>
+        <label>Người được ủy quyền<select value={delegateId} disabled={busy} onChange={e=>setDelegateId(Number(e.target.value))}>
+          {candidates.length===0&&<option value={0}>Không có người đủ điều kiện</option>}
+          {candidates.map(x=><option key={x.MaNguoiDung} value={x.MaNguoiDung}>{x.HoTen}</option>)}
+        </select></label>
+        <label>Thời hạn (giờ)<input type="number" min={1} max={720} value={hours} disabled={busy} onChange={e=>setHours(Number(e.target.value))}/></label>
+        <label className="admin-delegation-reason">Lý do ủy quyền<textarea rows={3} maxLength={500} minLength={10} value={reason}
+          onChange={e=>setReason(e.target.value)} placeholder="Ví dụ: Trưởng phòng đang đi công tác, ủy quyền Phó trưởng phòng xử lý tác vụ này."/></label>
+        <button className="primary small" disabled={busy||!delegateId||hours<1||hours>720||reason.trim().length<10}
+          onClick={()=>submit('grant')}><ShieldCheck size={15}/> Cấp ủy quyền</button>
+      </>}
+      {current&&current.MaNguoiDuocUyQuyen!=null&&!current.DaThuHoi&&<button className="secondary small" disabled={busy} onClick={()=>submit('revoke')}>Thu hồi ủy quyền</button>}
+    </div>
+    {error&&<div className="form-error">{error}</div>}{message&&<p className="success-note">{message}</p>}
+  </section>;
+}
 type PermissionRow={MaDinhDanh:string;TenQuyen:string;ChoPhep:boolean|null;TuVaiTro:boolean};
 function UserPermissionSettings({token,user,onClose}:{token:string;user:AdminUser;onClose:()=>void}){
   const [permissions,setPermissions]=useState<PermissionRow[]>([]);
@@ -1291,6 +1366,11 @@ export default function App() {
         <h1>Cơ cấu phòng ban</h1><p>Thêm, sửa, sắp xếp thứ bậc và quản lý các phòng trực thuộc cơ quan.</p></div></div>
         {!DEMO?<DepartmentAdministration token={token}/>:
           <div className="panel">Chức năng quản lý cơ cấu phòng ban chỉ sử dụng khi kết nối API thật.</div>}</>}
+
+      {page==='uy-quyen'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ CƠ QUAN · 0.6.4.2</div>
+        <h1>Ủy quyền ký thay</h1><p>Giao quyền ký một tác vụ cụ thể có thời hạn, không thay đổi số bước ký văn bản.</p></div></div>
+        {!DEMO?<SigningDelegationAdministration token={token}/>:
+          <div className="panel">Chức năng ủy quyền ký chỉ sử dụng khi kết nối API thật.</div>}</>}
     </div>
     </main>
     {currentDoc&&<DocumentDetails key={currentDoc.id} doc={currentDoc} onClose={()=>setSelected(null)} onAction={action} allowed={actor}

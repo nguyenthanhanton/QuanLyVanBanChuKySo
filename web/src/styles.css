@@ -112,6 +112,15 @@
 @media(max-width:540px){.admin-department-create,.admin-department-fields{grid-template-columns:1fr}.admin-department-fields label:last-child{grid-column:auto}.admin-department-actions{justify-content:stretch}.admin-department-actions button{flex:1}}
 .admin-user-row{display:grid;grid-template-columns:minmax(155px,1.1fr) minmax(125px,1fr) minmax(125px,1fr) minmax(160px,1fr) auto;gap:12px;align-items:center;padding:16px 0;border-top:1px solid #e4eaf1}
 .admin-permission-settings{padding:18px;margin:15px 0 22px;background:#f6f9fe;border:1px solid #dbe7f6;border-radius:13px}
+.admin-signing-delegation{min-width:0}
+.admin-delegation-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;padding:18px;background:#f8fbff;border-radius:12px;border:1px solid #e0e8f3}
+.admin-delegation-form label{display:grid;gap:7px;min-width:0;color:#456380;font-size:13px;font-weight:600}
+.admin-delegation-form input,.admin-delegation-form select,.admin-delegation-form textarea{min-width:0;width:100%;box-sizing:border-box;border-radius:9px;border:1px solid #d7e2ef;background:#fff;padding:10px 12px;color:#183752;font:inherit}
+.admin-delegation-form>label:first-child,.admin-delegation-summary,.admin-delegation-reason{grid-column:1/-1}
+.admin-delegation-summary{display:grid;gap:6px;padding:14px;border-radius:9px;background:#eaf2fd;color:#275174;font-size:13px;overflow-wrap:anywhere}
+.admin-delegation-summary span{color:#6783a0}
+.admin-delegation-form>.primary,.admin-delegation-form>.secondary{grid-column:1/-1;justify-self:start}
+@media(max-width:650px){.admin-delegation-form{grid-template-columns:1fr;padding:12px}.admin-delegation-form>*{grid-column:1/-1}}
 .admin-permission-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}
 .admin-permission-item{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px;background:white;border:1px solid #e1e9f3;border-radius:9px;min-width:0}
 .admin-permission-item>div{display:grid;gap:5px;min-width:0}
