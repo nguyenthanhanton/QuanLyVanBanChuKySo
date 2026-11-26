@@ -1,4 +1,5 @@
 import {useEffect,useState} from 'react';
+import TepDinhKemVanBanDen from './TepDinhKemVanBanDen';
 
 type Row={maVanBanDen:string;tieuDe:string;soDen:number|null;trangThai:string;
   maPhongChuTri:number|null;tenPhongChuTri:string|null;tenPhongPhoiHop:string|null;
@@ -179,6 +180,7 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
     {picked&&<div className="incoming-work-detail">
       <h3>{picked.tieuDe}</h3>
       <button className="secondary small" disabled={busy} onClick={viewDocument}>Xem bản PDF đã ký số và đóng dấu</button>
+      <TepDinhKemVanBanDen url={`/api/v1/incoming-work/${selected}/attachments`} token={token}/>
       {picked.chiDao&&<p><strong>Chỉ đạo:</strong> {picked.chiDao}</p>}
       {data.leader&&picked.trangThai==='CHO_LANH_DAO'&&<div className="incoming-work-form">
         <label>Phòng chủ trì (bắt buộc)<select value={lead} onChange={e=>{
