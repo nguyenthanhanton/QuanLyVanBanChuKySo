@@ -32,6 +32,7 @@ const navigation: Navigation = [
     { id:'giao-nhan',label:'Giao nhận liên cơ quan',icon:Network,permission:'publications.deliver' },
     { id:'ho-so',label:'Hồ sơ lưu trữ',icon:FolderClosed,permission:'dossiers.manage' },
     { id:'bao-cao',label:'Báo cáo thống kê',icon:Activity,permission:'reports.read' },
+    { id:'giam-sat',label:'Giám sát tiến độ',icon:Clock3,permission:'reports.read' },
   ] },
   { group: 'QUẢN TRỊ', items: [
     { id:'quan-tri',label:'Quản trị tài khoản',icon:Settings2,permission:'users.manage' },
@@ -43,7 +44,7 @@ const navigation: Navigation = [
 const names: Record<Trang, string> = {
   'tong-quan':'Tổng quan', 'van-ban-di':'Quản lý văn bản đi', 'van-ban-den':'Quản lý văn bản đến',
   'cong-viec':'Việc cần xử lý', 'hanh-trinh':'Hành trình văn bản', 'giao-nhan':'Theo dõi giao nhận',
-  'ho-so':'Hồ sơ lưu trữ', 'bao-cao':'Báo cáo thống kê', 'quan-tri':'Quản trị tài khoản',
+  'ho-so':'Hồ sơ lưu trữ', 'bao-cao':'Báo cáo thống kê', 'giam-sat':'Giám sát tiến độ', 'quan-tri':'Quản trị tài khoản',
   'co-cau':'Quản lý cơ cấu phòng ban', 'uy-quyen':'Ủy quyền ký thay'
 };
 
@@ -148,6 +149,16 @@ function adaptLiveDocument(d: Record<string,unknown>):VanBan {
     signingSteps:Number(field(d,'SoBuocKy')??5),to:[],events:[],transfers:[]
   };
 }
+
+type MonitorTask={MaTacVu:string;MaVanBan:string;MaNoiBo:string;TieuDe:string;
+  Buoc:string;TrangThai:string;HanXuLy:string|null;ThoiDiemTao:string;ThoiDiemHoanThanh:string|null;
+  NguoiPhuTrach:string;TenPhongBan:string|null;NguoiKyThay:string|null;TinhTrangHan:string;SoPhutXuLy:number};
+type MonitorReport={NguoiXuLy:string;PhongBan:string;Tong:number;DangCho:number;DaXuLy:number;
+  QuaHan:number;DungHan:number;PhutTrungBinh:number|null};
+type MonitorNotification={MaThamChieu:string;LoaiThongBao:string;MaVanBan:string;MaNoiBo:string;
+  TieuDe:string;ThoiDiem:string;MucDo:string;DaDoc:boolean};
+const deadlineLabels:Record<string,string>={HOAN_THANH:'Đã hoàn thành',QUA_HAN:'Quá hạn',
+  SAP_DEN_HAN:'Sắp đến hạn',TRONG_HAN:'Trong hạn',CHUA_DAT_HAN:'Chưa đặt hạn'};
 
 function Login({onLogin}:{onLogin:(name:string,password:string)=>Promise<void>}) {
   const [name,setName]=useState('vanthu_a');
@@ -1094,6 +1105,15 @@ export default function App() {
   const [remoteTimeline,setRemoteTimeline]=useState<{events:SuKien[];transfers:ChuyenPhat[]}|undefined>();
   const [journeyTimeline,setJourneyTimeline]=useState<{events:SuKien[];transfers:ChuyenPhat[]}|undefined>();
   const [workqueue,setWorkqueue]=useState<Record<string,unknown>[]>([]);
+  const [monitorTasks,setMonitorTasks]=useState<MonitorTask[]>([]);
+  const [monitorReports,setMonitorReports]=useState<MonitorReport[]>([]);
+  const [notifications,setNotifications]=useState<MonitorNotification[]>([]);
+  const [notificationOpen,setNotificationOpen]=useState(false);
+  const [monitorFilter,setMonitorFilter]=useState('ALL');
+  useEffect(()=>{if(DEMO||!token)return;
+    requestApi('/monitor/notifications',token).then(setNotifications).catch(()=>{});
+    requestApi('/monitor/tasks',token).then(setMonitorTasks).catch(()=>{});
+  },[token]);
   const [agencyOptions,setAgencyOptions]=useState<{value:string;label:string}[]>(DEMO?[{value:'Cơ quan B',label:'Cơ quan B'},{value:'Cơ quan C',label:'Cơ quan C'}]:[]);
   const [error,setError]=useState('');
 
@@ -1181,6 +1201,33 @@ export default function App() {
     }));
     setDocs([...(documents as Record<string,unknown>[]).map(adaptLiveDocument),...inbound]);
     setWorkqueue(tasks as Record<string,unknown>[]);
+    const [progress,messages]=await Promise.all([
+      requestApi('/monitor/tasks',authToken).catch(()=>[]),
+      requestApi('/monitor/notifications',authToken).catch(()=>[])
+    ]);
+    setMonitorTasks(progress as MonitorTask[]);setNotifications(messages as MonitorNotification[]);
+  };
+  const fetchReports=async()=>{
+    if(DEMO||!token||!isAllowed(actor,'reports.read'))return;
+    try{setMonitorReports(await requestApi('/monitor/reports',token) as MonitorReport[]);}
+    catch(err){setError((err as Error).message);}
+  };
+  useEffect(()=>{if(page==='bao-cao'||page==='giam-sat')void fetchReports();},[page,token]);
+  const openMonitoredDocument=async(id:string)=>{
+    const existing=visibleDocs.find(d=>d.id===id);
+    if(existing){await openDoc(existing);return;}
+    try{const data=await requestApi(`/documents/${id}`,token) as Record<string,unknown>;
+      const document=adaptLiveDocument(data);
+      setDocs(previous=>previous.some(d=>d.id===id)?previous:[...previous,document]);await openDoc(document);
+    }catch{setError('Không có quyền mở chi tiết văn bản này; chỉ được xem số liệu giám sát.');}
+  };
+  const markNotification=async(n:MonitorNotification)=>{
+    try{await requestApi('/monitor/notifications/read',token,{method:'POST',body:JSON.stringify({
+      loaiThongBao:n.LoaiThongBao,maThamChieu:n.MaThamChieu})});
+      setNotifications(old=>old.map(x=>x.MaThamChieu===n.MaThamChieu&&x.LoaiThongBao===n.LoaiThongBao?{...x,DaDoc:true}:x));
+      setNotificationOpen(false);
+      await openMonitoredDocument(n.MaVanBan);
+    }catch(err){setError((err as Error).message);}
   };
   const login=async(name:string,password:string)=>{
     if(DEMO){
@@ -1314,7 +1361,15 @@ export default function App() {
       <div className="header-right">
         {hasDocs&&<div className="global-search"><Search size={19}/><input aria-label="Tìm kiếm văn bản" placeholder="Tìm văn bản, số ký hiệu..." value={query} onChange={e=>setQuery(e.target.value)}/>
           <span>⌘ K</span></div>}
-        <button className="icon-button notification-button" title="Thông báo" onClick={()=>setNotice('Thông báo công việc sẽ được cập nhật theo quyền truy cập.')}><Bell size={20}/><span className="notification-dot"/></button>
+        <button className="icon-button notification-button" title="Thông báo" onClick={()=>setNotificationOpen(x=>!x)}>
+          <Bell size={20}/>{notifications.some(n=>!n.DaDoc)&&<span className="notification-dot"/>}</button>
+        {notificationOpen&&<div className="notification-popup"><h3>Thông báo của tôi</h3>
+          {notifications.slice(0,30).map(n=><button key={`${n.LoaiThongBao}-${n.MaThamChieu}`}
+            className={n.DaDoc?'read':''} onClick={()=>void markNotification(n)}>
+            <strong>{n.TieuDe}</strong><small>{n.MaNoiBo} · {formatDate(n.ThoiDiem)} · {n.MucDo==='QUA_HAN'?'Quá hạn':n.MucDo==='SAP_DEN_HAN'?'Sắp đến hạn':''}</small>
+          </button>)}
+          {notifications.length===0&&<p>Chưa có thông báo.</p>}
+        </div>}
         <div className="header-divider"/><button className="user-button" onClick={()=>setProfileMenu(!profileMenu)}>
           <span className="avatar">{initials(actor.name)}</span><span className="user-name"><strong>{actor.name}</strong><small>{actor.position}</small></span><ChevronDown size={16}/></button>
         {profileMenu&&<div className="profile-menu"><div className="profile-menu-title">{actor.username}</div>
@@ -1389,7 +1444,10 @@ export default function App() {
       {page==='cong-viec'&&<><div className="page-intro compact"><div><div className="overline">HÀNG ĐỢI CÔNG VIỆC</div><h1>Việc cần xử lý</h1><p>Các văn bản đang chờ bạn kiểm tra, phê duyệt hoặc giải quyết.</p></div></div>
         <div className="panel tasks-panel"><div className="panel-head"><h3>Công việc của tôi</h3><span className="count-bubble">{DEMO?visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length:workqueue.length}</span></div>
           {DEMO?visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).map(d=><button className="task-row" key={d.id} onClick={()=>openDoc(d)}><div className="task-icon"><FileClock size={20}/></div><div><strong>{d.title}</strong><small>{d.code} · Hạn {formatDate(d.dueAt)}</small></div><Status status={d.status}/><ChevronRight size={18}/></button>)
-           :workqueue.map(t=><button className="task-row" key={String(field(t,'MaTacVu'))} onClick={()=>void openWorkqueueDocument(t)}><div className="task-icon"><FileClock size={20}/></div><div><strong>{String(field(t,'TieuDe'))}</strong><small>{String(field(t,'MaNoiBo'))} · {String(field(t,'Buoc'))}</small></div><Status status="CHO_DUYET"/><ChevronRight size={18}/></button>)}
+           :workqueue.map(t=>{const progress=monitorTasks.find(m=>m.MaTacVu===String(field(t,'MaTacVu')));
+             return <button className="task-row" key={String(field(t,'MaTacVu'))} onClick={()=>void openWorkqueueDocument(t)}><div className="task-icon"><FileClock size={20}/></div><div><strong>{String(field(t,'TieuDe'))}</strong>
+               <small>{String(field(t,'MaNoiBo'))} · {String(field(t,'Buoc'))} · Hạn: {formatDate(progress?.HanXuLy??undefined)}</small></div>
+               <span className={`deadline-pill ${progress?.TinhTrangHan??''}`}>{deadlineLabels[progress?.TinhTrangHan??'']??'Đang xử lý'}</span><ChevronRight size={18}/></button>;})}
           {DEMO&&visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length===0&&<EmptyView title="Không có việc đang chờ" message="Các công việc được giao sẽ hiện tại đây." icon={CheckCheck}/>}</div></>}
 
       {page==='giao-nhan'&&<><div className="page-intro compact"><div><div className="overline">CHUYỂN PHÁT LIÊN CƠ QUAN</div><h1>Giao nhận văn bản</h1><p>Biên nhận được theo dõi độc lập tại mỗi cơ quan nhận.</p></div></div>
@@ -1405,13 +1463,37 @@ export default function App() {
       {page==='ho-so'&&<><div className="page-intro compact"><div><div className="overline">LƯU TRỮ ĐIỆN TỬ</div><h1>Hồ sơ lưu trữ</h1><p>Tập hợp văn bản và quản lý vị trí lưu hồ sơ giấy.</p></div></div>
         <EmptyView title="Chưa có hồ sơ" message="Chức năng tạo, liên kết và đóng hồ sơ sẽ được triển khai trong giai đoạn tiếp theo." icon={Archive}/></>}
 
-      {page==='bao-cao'&&<><div className="page-intro compact"><div><div className="overline">THỐNG KÊ</div><h1>Báo cáo tổng hợp</h1><p>Chỉ số trong phạm vi cơ quan và quyền đang đăng nhập.</p></div></div>
+      {page==='bao-cao'&&<><div className="page-intro compact"><div><div className="overline">THỐNG KÊ · 0.6.5</div><h1>Báo cáo hiệu suất</h1>
+        <p>Chỉ tổng hợp tác vụ văn bản thường thuộc cơ quan; không tự động thay đổi tác vụ.</p></div>
+        {!DEMO&&<button className="primary" onClick={()=>downloadApi('/monitor/reports/excel',token,'bao-cao-giam-sat-065.xlsx').catch(e=>setError((e as Error).message))}>Xuất Excel</button>}</div>
         <div className="report-grid">{[
-          ['Văn bản đang xử lý',visibleDocs.filter(d=>d.status!=='HOAN_THANH').length],
-          ['Văn bản đã hoàn thành',visibleDocs.filter(d=>d.status==='HOAN_THANH').length],
-          ['Văn bản khẩn',visibleDocs.filter(d=>d.urgency!=='THUONG').length],
-          ['Lượt giao nhận',totalTransfer]
-        ].map(([label,value])=><div className="panel report-item" key={label}><span>{label}</span><strong>{value}</strong><div className="report-bar"/></div>)}</div></>}
+          ['Tổng tác vụ',monitorReports.reduce((s,r)=>s+r.Tong,0)],
+          ['Đang chờ',monitorReports.reduce((s,r)=>s+r.DangCho,0)],
+          ['Đã xử lý',monitorReports.reduce((s,r)=>s+r.DaXuLy,0)],
+          ['Quá hạn',monitorReports.reduce((s,r)=>s+r.QuaHan,0)]
+        ].map(([label,value])=><div className="panel report-item" key={label}><span>{label}</span><strong>{value}</strong><div className="report-bar"/></div>)}</div>
+        <div className="panel monitor-panel"><div className="panel-head"><h3>Hiệu suất theo người và phòng ban</h3></div>
+          <div className="monitor-table-wrap"><table><thead><tr><th>Phòng ban</th><th>Người xử lý</th><th>Tổng</th><th>Đã xử lý</th><th>Quá hạn</th><th>Đúng hạn</th><th>Trung bình</th></tr></thead>
+            <tbody>{monitorReports.map((r,i)=><tr key={`${r.NguoiXuLy}-${i}`}><td>{r.PhongBan}</td><td>{r.NguoiXuLy}</td><td>{r.Tong}</td><td>{r.DaXuLy}</td><td>{r.QuaHan}</td>
+              <td>{r.DungHan}</td><td>{r.PhutTrungBinh==null?'—':`${(r.PhutTrungBinh/60).toFixed(1)} giờ`}</td></tr>)}</tbody></table></div>
+          {monitorReports.length===0&&<p className="fine-note">Chưa có tác vụ để thống kê.</p>}
+        </div></>}
+
+      {page==='giam-sat'&&<><div className="page-intro compact"><div><div className="overline">GIÁM SÁT · 0.6.5</div><h1>Theo dõi tiến độ</h1>
+          <p>Chỉ xem bước xử lý, người phụ trách, thời gian chờ và hạn; không tự động chuyển bước.</p></div></div>
+        <div className="panel monitor-panel"><div className="panel-head"><h3>Tác vụ trong phạm vi giám sát</h3>
+          <label>Lọc hạn xử lý <select value={monitorFilter} onChange={e=>setMonitorFilter(e.target.value)}>
+            <option value="ALL">Tất cả</option>{Object.entries(deadlineLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}
+          </select></label></div>
+          <div className="monitor-table-wrap"><table><thead><tr><th>Văn bản</th><th>Bước</th><th>Người xử lý</th><th>Giao lúc</th><th>Hạn</th><th>Đã chờ</th><th>Tình trạng</th></tr></thead>
+            <tbody>{monitorTasks.filter(t=>monitorFilter==='ALL'||t.TinhTrangHan===monitorFilter).map(t=><tr key={t.MaTacVu}>
+              <td><button className="monitor-link" onClick={()=>void openMonitoredDocument(t.MaVanBan)}>{t.TieuDe}<small>{t.MaNoiBo}</small></button></td>
+              <td>{t.Buoc}</td><td>{t.NguoiPhuTrach}<small>{t.TenPhongBan??'Chưa phân phòng'}</small>{t.NguoiKyThay&&<small>Ký thay: {t.NguoiKyThay}</small>}</td>
+              <td>{formatDate(t.ThoiDiemTao)}</td><td>{formatDate(t.HanXuLy??undefined)}</td>
+              <td>{Math.max(0,t.SoPhutXuLy/60).toFixed(1)} giờ</td><td><span className={`deadline-pill ${t.TinhTrangHan}`}>{deadlineLabels[t.TinhTrangHan]??t.TinhTrangHan}</span></td>
+            </tr>)}</tbody></table></div>
+          {monitorTasks.length===0&&<p className="fine-note">Chưa có tác vụ để giám sát.</p>}
+        </div></>}
 
       {page==='quan-tri'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ CƠ QUAN · 0.6.1</div><h1>Quản trị tài khoản</h1>
         <p>Tạo tài khoản, phân công phòng ban và chức vụ. Quản trị viên không mặc nhiên được xem văn bản nghiệp vụ.</p></div></div>
