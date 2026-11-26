@@ -51,4 +51,5 @@ app.MapQuanTriPhanQuyen();
 app.MapUyQuyenKy();
 app.MapGiamSat();
 app.MapHoSo();
+app.MapNopLuu();
 app.Run();
