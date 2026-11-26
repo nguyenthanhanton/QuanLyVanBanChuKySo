@@ -166,6 +166,8 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
       </div><div className="incoming-work-actions">
         {data.clerk&&row.trangThai==='CHO_DANG_KY'&&<button className="primary small" disabled={busy}
           onClick={()=>submit(`/${row.maVanBanDen}/submit`)}>Trình lãnh đạo</button>}
+        {data.clerk&&row.soDen==null&&<button className="secondary small" disabled={busy}
+          onClick={()=>submit(`/${row.maVanBanDen}/register`)}>Cấp số đến</button>}
         <button className="secondary small" onClick={()=>choose(row)}>{selected===row.maVanBanDen?'Đang xem':'Xử lý / Chi tiết'}</button>
       </div></div>)}
     {data.rows.length===0&&<p className="subtle" style={{padding:20}}>Chưa có văn bản đến thuộc phạm vi xử lý của bạn.</p>}
@@ -176,7 +178,7 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
     </div>}
     {picked&&<div className="incoming-work-detail">
       <h3>{picked.tieuDe}</h3>
-      <button className="secondary small" disabled={busy} onClick={viewDocument}>Xem văn bản đến (PDF gốc đã ký)</button>
+      <button className="secondary small" disabled={busy} onClick={viewDocument}>Xem bản PDF đã ký số và đóng dấu</button>
       {picked.chiDao&&<p><strong>Chỉ đạo:</strong> {picked.chiDao}</p>}
       {data.leader&&picked.trangThai==='CHO_LANH_DAO'&&<div className="incoming-work-form">
         <label>Phòng chủ trì (bắt buộc)<select value={lead} onChange={e=>{
