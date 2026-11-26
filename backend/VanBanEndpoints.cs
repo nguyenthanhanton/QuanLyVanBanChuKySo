@@ -61,7 +61,7 @@ public static class VanBanEndpoints
             var rows = await cn.QueryAsync(@"
                 SELECT v.MaVanBan, v.MaNoiBo, v.TieuDe, v.TrichYeu, v.TrangThai,
                        v.DoMat, v.DoKhan, v.LoaiVanBan, v.PhienBanHienTai, v.SoPhatHanh,
-                       v.KyHieu, v.NgayBanHanh, v.ThoiDiemTao, v.ThoiDiemCapNhat,
+                       v.KyHieu, v.NgayBanHanh, v.ThoiDiemTao, v.ThoiDiemCapNhat,v.SoBuocKy,
                        n.HoTen AS NguoiTao, v.PhienBanDong
                 FROM dbo.VanBan v JOIN dbo.NguoiDung n ON n.MaNguoiDung=v.MaNguoiTao
                 WHERE v.MaCoQuan=@agency
@@ -82,7 +82,7 @@ public static class VanBanEndpoints
             var doc = await cn.QuerySingleOrDefaultAsync(@"
                 SELECT v.MaVanBan, v.MaNoiBo, v.TieuDe, v.TrichYeu, v.TrangThai,
                        v.DoMat, v.DoKhan, v.LoaiVanBan, v.PhienBanHienTai, v.SoPhatHanh,
-                       v.KyHieu, v.NgayBanHanh, v.ThoiDiemTao, v.PhienBanDong,
+                       v.KyHieu, v.NgayBanHanh, v.ThoiDiemTao, v.PhienBanDong,v.SoBuocKy,
                        n.HoTen AS NguoiTao, c.TenCoQuan
                 FROM dbo.VanBan v
                 JOIN dbo.NguoiDung n ON n.MaNguoiDung=v.MaNguoiTao

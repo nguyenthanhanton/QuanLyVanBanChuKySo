@@ -25,14 +25,15 @@ public static class PhatHanhEndpoints
             SELECT p.MaBan,p.DuongDanLuuTru,p.MaBamSha256
             FROM dbo.BanPdfDaKy p JOIN dbo.BanPhatHanh b
                 ON b.MaVanBan=p.MaVanBan AND b.SoPhienBan=p.SoPhienBan
+            JOIN dbo.VanBan v ON v.MaVanBan=b.MaVanBan
             WHERE b.MaPhatHanh=@publication AND p.MaVanBan=@id
-                AND p.MaCoQuan=@agency AND p.ThuTuKy=5 AND p.MaBamSha256=b.MaBamBanCuoi",
+                AND p.MaCoQuan=@agency AND p.ThuTuKy=v.SoBuocKy AND p.MaBamSha256=b.MaBamBanCuoi",
             new{publication,id,agency});
         if(pdf==null || !File.Exists(pdf.DuongDanLuuTru))return Results.Conflict(new{message="Không có PDF phát hành."});
         var hash=await DichVuKyPdf.Bam(pdf.DuongDanLuuTru);
         if(hash!=pdf.MaBamSha256)return Results.Conflict(new{message="PDF phát hành bị thay đổi."});
         var signatures=signer.XacMinh(pdf.DuongDanLuuTru);
-        if(signatures.Count!=5 || signatures.Any(s=>!s.ToanVenMatMa) ||
+        if(signatures.Count is not (4 or 5) || signatures.Any(s=>!s.ToanVenMatMa) ||
            !signatures[^1].BaoPhuToanBoBanHienTai)
             return Results.Conflict(new{message="Chữ ký PDF phát hành không hợp lệ về mật mã."});
         return null;
@@ -54,12 +55,12 @@ public static class PhatHanhEndpoints
             var doc=await KySoEndpoints.LayVanBan(cn,tx,id,actor.MaCoQuan.Value);
             if(doc==null){tx.Rollback();return Results.NotFound();}
             if(doc.TrangThai!="DA_KY"){
-                tx.Rollback();return Results.Conflict(new{message="Phải có đủ năm chữ ký hợp lệ trước khi phát hành."});
+                tx.Rollback();return Results.Conflict(new{message="Phải có đủ chữ ký hợp lệ trước khi phát hành."});
             }
             if(doc.SoPhatHanh is null || string.IsNullOrWhiteSpace(doc.KyHieu)){
                 tx.Rollback();return Results.Conflict(new{message="Chưa cấp số và ký hiệu văn bản."});
             }
-            var pdf=await KySoEndpoints.LayBan(cn,tx,id,doc.PhienBanHienTai,5);
+            var pdf=await KySoEndpoints.LayBan(cn,tx,id,doc.PhienBanHienTai,doc.SoBuocKy);
             if(pdf==null || !File.Exists(pdf.DuongDanLuuTru)){
                 tx.Rollback();return Results.Conflict(new{message="Thiếu bản PDF đủ chữ ký."});
             }
@@ -71,9 +72,9 @@ public static class PhatHanhEndpoints
             catch(Exception ex)when(ex is CryptographicException or IOException or iText.Kernel.Exceptions.PdfException){
                 tx.Rollback();return Results.Conflict(new{message="Không xác minh được PDF: "+ex.Message});
             }
-            if(signatures.Count!=5 || signatures.Any(s=>!s.ToanVenMatMa) ||
+            if(signatures.Count!=doc.SoBuocKy || signatures.Any(s=>!s.ToanVenMatMa) ||
                 !signatures[^1].BaoPhuToanBoBanHienTai){
-                tx.Rollback();return Results.Conflict(new{message="Năm chữ ký PDF chưa hợp lệ về mật mã."});
+                tx.Rollback();return Results.Conflict(new{message="Chuỗi chữ ký PDF chưa hợp lệ về mật mã."});
             }
             var recipients=(await cn.QueryAsync<int>(@"
                 SELECT MaCoQuanNhan FROM dbo.NoiNhanDuKien WHERE MaVanBan=@id",new{id},tx)).ToArray();
@@ -292,10 +293,11 @@ public static class PhatHanhEndpoints
             using var cn=db.Open();
             var row=await cn.QuerySingleOrDefaultAsync<dynamic>(@"
                 SELECT p.MaVanBan,p.MaCoQuanPhatHanh,p.MaPhatHanh,l.MaCoQuanGui,l.MaCoQuanNhan,l.TrangThai,
-                    s.DuongDanLuuTru,s.MaBamSha256
+                    s.DuongDanLuuTru,s.MaBamSha256,v.SoBuocKy
                 FROM dbo.LuotChuyenVanBan l JOIN dbo.BanPhatHanh p ON p.MaPhatHanh=l.MaPhatHanh
+                JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
                 JOIN dbo.BanPdfDaKy s ON s.MaVanBan=p.MaVanBan AND s.SoPhienBan=p.SoPhienBan
-                    AND s.ThuTuKy=5 AND s.MaBamSha256=p.MaBamBanCuoi
+                    AND s.ThuTuKy=v.SoBuocKy AND s.MaBamSha256=p.MaBamBanCuoi
                 WHERE l.MaLuotChuyen=@id",new{id});
             if(row==null)return Results.NotFound();
             bool sending=actor.MaCoQuan==(int)row.MaCoQuanGui && rights.Contains("publications.deliver");
@@ -307,7 +309,7 @@ public static class PhatHanhEndpoints
             if(!File.Exists(path) || await DichVuKyPdf.Bam(path)!=hash)
                 return Results.Conflict(new{message="PDF phát hành không còn toàn vẹn."});
             var verified=signer.XacMinh(path);
-            if(verified.Count!=5 || verified.Any(s=>!s.ToanVenMatMa) ||
+            if(verified.Count!=Convert.ToInt32(row.SoBuocKy) || verified.Any(s=>!s.ToanVenMatMa) ||
                !verified[^1].BaoPhuToanBoBanHienTai)
                 return Results.Conflict(new{message="Không thể xác minh bản PDF phát hành."});
             return Results.File(path,"application/pdf",$"van-ban-phat-hanh-{id:N}.pdf");

@@ -77,4 +77,8 @@
 .placement-resize{position:absolute;width:18px;height:18px;bottom:-9px;right:-9px;background:#1375cc;border:2px solid white;border-radius:4px;cursor:nwse-resize;touch-action:none}
 .placement-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid #dce7f2}
 .placement-pages{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;color:#365a77}
+.signer-picker{background:#fff;border-radius:14px;padding:25px;width:min(520px,94vw);box-shadow:0 15px 55px #071e3c44}
+.signer-picker h3{margin:0 0 12px;color:#193e62}
+.signer-picker label{display:block;font-size:13px;font-weight:700;color:#335571;margin:17px 0}
+.signer-picker select{width:100%;margin-top:8px;padding:12px;border-radius:8px;background:#fff;border:1px solid #cedeee;color:#1f4161}
 @media(max-width:620px){.placement-scroll{padding:8px}.placement-footer{flex-wrap:wrap}.placement-page{max-width:100%}.placement-pages{flex-wrap:wrap}}

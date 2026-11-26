@@ -18,6 +18,9 @@ public sealed class HoSoKy {
     public int? SoPhatHanh {get;set;}
     public string? KyHieu {get;set;}
     public int MaNguoiTao {get;set;}
+    public byte SoBuocKy {get;set;}=5;
+    public int? MaNguoiKyNhay {get;set;}
+    public int? MaNguoiKyLanhDao {get;set;}
 }
 public sealed class ChungThuLuu {
     public Guid MaChungThu {get;set;}
@@ -95,7 +98,8 @@ public static class KySoEndpoints
     internal static async Task<HoSoKy?> LayVanBan(System.Data.IDbConnection cn,
         System.Data.IDbTransaction tx,Guid id,int agency)
         => await cn.QuerySingleOrDefaultAsync<HoSoKy>(@"
-            SELECT MaVanBan,MaCoQuan,MaNguoiTao,PhienBanHienTai,TrangThai,TieuDe,SoPhatHanh,KyHieu
+            SELECT MaVanBan,MaCoQuan,MaNguoiTao,PhienBanHienTai,TrangThai,TieuDe,SoPhatHanh,KyHieu,
+                   SoBuocKy,MaNguoiKyNhay,MaNguoiKyLanhDao
             FROM dbo.VanBan WITH(UPDLOCK,HOLDLOCK) WHERE MaVanBan=@id AND MaCoQuan=@agency",
             new{id,agency},tx);
 
@@ -354,17 +358,29 @@ public static class KySoEndpoints
                 return Results.BadRequest(new{message="Loại chữ ký hoặc MaYeuCau không hợp lệ."});
             using var cn=db.Open();await cn.OpenAsync();
             using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
-            var command="KY_"+stage.Order;
-            var old=await LayBienNhan(cn,tx,actor.MaCoQuan.Value,request.MaYeuCau,command);
-            if(old!=null){tx.Commit();return Results.Content(old,"application/json");}
-            if(!await CoVaiTro(cn,tx,actor,stage.Role)){
-                tx.Rollback();return Results.Forbid();
-            }
             if(!await KiemTraMatKhau(cn,tx,actor,request.MatKhau)){
                 tx.Rollback();return Results.BadRequest(new{message="Sai mật khẩu xác nhận ký."});
             }
             var doc=await LayVanBan(cn,tx,id,actor.MaCoQuan.Value);
             if(doc==null){tx.Rollback();return Results.NotFound();}
+            if(doc.SoBuocKy==4){
+                if(request.LoaiChuKy=="KY_THE_THUC"){
+                    tx.Rollback();return Results.Conflict(new{message="Quy trình 4 vị trí không có bước ký thể thức riêng."});
+                }
+                if(request.LoaiChuKy=="KY_LANH_DAO")stage=(3,"LANH_DAO","PHE_DUYET_LANH_DAO");
+                if((request.LoaiChuKy=="KY_NHAY" && doc.MaNguoiKyNhay!=actor.MaNguoiDung) ||
+                   (request.LoaiChuKy=="KY_LANH_DAO" && doc.MaNguoiKyLanhDao!=actor.MaNguoiDung)){
+                    tx.Rollback();return Results.Forbid();
+                }
+            }
+            var command="KY_"+stage.Order;
+            var old=await LayBienNhan(cn,tx,actor.MaCoQuan.Value,request.MaYeuCau,command);
+            if(old!=null){tx.Commit();return Results.Content(old,"application/json");}
+            if(!await CoVaiTro(cn,tx,actor,stage.Role) &&
+               !(doc.SoBuocKy==4 && request.LoaiChuKy=="KY_NHAY" &&
+                 await CoVaiTro(cn,tx,actor,"TRUONG_VAN_PHONG"))){
+                tx.Rollback();return Results.Forbid();
+            }
             if(doc.TrangThai!="CHO_DUYET"){
                 tx.Rollback();return Results.Conflict(new{message="Văn bản phải ở bước chờ duyệt để ký theo cấp."});
             }
@@ -407,7 +423,8 @@ public static class KySoEndpoints
             try {
                 var signed=signer.Ky(previous.DuongDanLuuTru,path,field,cert.MaChungThu,
                     actor.MaCoQuan.Value,owner,cert.DuongDanKhoaMaHoa,request.LoaiChuKy!,
-                    ViTriKy(request,stage.Order switch{2=>"Ky nhay",3=>"Kiem tra the thuc",_=>"Lanh dao"}));
+                    ViTriKy(request,request.LoaiChuKy switch{
+                        "KY_NHAY"=>"Ky nhay","KY_THE_THUC"=>"Kiem tra the thuc",_=>"Lanh dao"}));
                 var verified=signer.XacMinh(path);
                 if(verified.Count!=stage.Order || verified.Any(s=>!s.ToanVenMatMa) ||
                    !verified[^1].BaoPhuToanBoBanHienTai)
@@ -434,7 +451,7 @@ public static class KySoEndpoints
                     INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,HanhDong,MoTa,TrangThaiTruoc,TrangThaiSau,SoPhienBan)
                     VALUES(@id,@agency,@user,@type,@message,'CHO_DUYET',@next,@version)",
                     new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,type=request.LoaiChuKy,
-                        message=$"{actor.HoTen} ký số PDF; bước {stage.Order}/5, SHA-256 {hash[..16]}…",
+                        message=$"{actor.HoTen} ký số PDF; bước {stage.Order}/{doc.SoBuocKy}, SHA-256 {hash[..16]}…",
                         next,version=doc.PhienBanHienTai},tx);
                 var json=JsonSerializer.Serialize(new{maVanBan=id,loaiChuKy=request.LoaiChuKy,
                     trangThai=next,maBan=fileId,maBamSha256=hash,hopLeMatMa=true,
@@ -458,8 +475,6 @@ public static class KySoEndpoints
                 return Results.BadRequest(new{message="Loại chữ ký hoặc MaYeuCau không hợp lệ."});
             using var cn=db.Open();await cn.OpenAsync();
             using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
-            var old=await LayBienNhan(cn,tx,actor.MaCoQuan.Value,request.MaYeuCau,"KY_5");
-            if(old!=null){tx.Commit();return Results.Content(old,"application/json");}
             if(!await CoVaiTro(cn,tx,actor,"VAN_THU")){
                 tx.Rollback();return Results.Forbid();
             }
@@ -471,16 +486,19 @@ public static class KySoEndpoints
             if(doc.TrangThai!="DA_CAP_SO" || doc.SoPhatHanh is null || string.IsNullOrWhiteSpace(doc.KyHieu)){
                 tx.Rollback();return Results.Conflict(new{message="Văn bản chưa được cấp số và ký hiệu."});
             }
-            if(await LayBan(cn,tx,id,doc.PhienBanHienTai,5)!=null){
+            var agencyOrder=doc.SoBuocKy;
+            var old=await LayBienNhan(cn,tx,actor.MaCoQuan.Value,request.MaYeuCau,"KY_"+agencyOrder);
+            if(old!=null){tx.Commit();return Results.Content(old,"application/json");}
+            if(await LayBan(cn,tx,id,doc.PhienBanHienTai,agencyOrder)!=null){
                 tx.Rollback();return Results.Conflict(new{message="Chứng thư cơ quan đã ký phiên bản này."});
             }
-            var prior=await LayBan(cn,tx,id,doc.PhienBanHienTai,4);
+            var prior=await LayBan(cn,tx,id,doc.PhienBanHienTai,agencyOrder-1);
             if(prior==null || !File.Exists(prior.DuongDanLuuTru) ||
                !string.Equals(await DichVuKyPdf.Bam(prior.DuongDanLuuTru),prior.MaBamSha256,StringComparison.OrdinalIgnoreCase)){
                 tx.Rollback();return Results.Conflict(new{message="Không có PDF bốn chữ ký hợp lệ."});
             }
             var earlier=signer.XacMinh(prior.DuongDanLuuTru);
-            if(earlier.Count!=4 || earlier.Any(s=>!s.ToanVenMatMa) || !earlier[^1].BaoPhuToanBoBanHienTai){
+            if(earlier.Count!=agencyOrder-1 || earlier.Any(s=>!s.ToanVenMatMa) || !earlier[^1].BaoPhuToanBoBanHienTai){
                 tx.Rollback();return Results.Conflict(new{message="Bốn chữ ký trước chưa toàn vẹn."});
             }
             var cert=await cn.QuerySingleOrDefaultAsync<ChungThuLuu>(@"
@@ -495,21 +513,21 @@ public static class KySoEndpoints
                 tx.Rollback();return Results.Conflict(new{message="Khóa mã hóa chứng thư không đúng bộ khóa hiện tại."});
             }
             var fileId=Guid.NewGuid();var path=TaoDuongDan(config,actor.MaCoQuan.Value,id,fileId);
-            var field=$"Ky_5_{id:N}_v{doc.PhienBanHienTai}";
+            var field=$"Ky_{agencyOrder}_{id:N}_v{doc.PhienBanHienTai}";
             try{
                 var signed=signer.Ky(prior.DuongDanLuuTru,path,field,cert.MaChungThu,
                     actor.MaCoQuan.Value,null,cert.DuongDanKhoaMaHoa,"KY_CO_QUAN",
                     ViTriKy(request,$"So: {doc.SoPhatHanh}/{doc.KyHieu}",true));
                 var checks=signer.XacMinh(path);
-                if(checks.Count!=5 || checks.Any(s=>!s.ToanVenMatMa) || !checks[^1].BaoPhuToanBoBanHienTai)
-                    throw new CryptographicException("Chuỗi năm chữ ký PDF không toàn vẹn.");
+                if(checks.Count!=agencyOrder || checks.Any(s=>!s.ToanVenMatMa) || !checks[^1].BaoPhuToanBoBanHienTai)
+                    throw new CryptographicException("Chuỗi chữ ký PDF không toàn vẹn.");
                 var hash=await DichVuKyPdf.Bam(path);
                 await cn.ExecuteAsync(@"
                     INSERT dbo.BanPdfDaKy(MaBan,MaVanBan,MaCoQuan,SoPhienBan,ThuTuKy,MaBanTruoc,
                         DuongDanLuuTru,MaBamSha256,TenTruongKy)
-                    VALUES(@fileId,@id,@agency,@version,5,@prior,@path,@hash,@field)",
+                    VALUES(@fileId,@id,@agency,@version,@order,@prior,@path,@hash,@field)",
                     new{fileId,id,agency=actor.MaCoQuan,version=doc.PhienBanHienTai,
-                        prior=prior.MaBan,path,hash,field},tx);
+                        order=agencyOrder,prior=prior.MaBan,path,hash,field},tx);
                 await cn.ExecuteAsync(@"
                     INSERT dbo.ChuKySo(MaVanBan,MaCoQuan,MaNguoiKy,SoPhienBan,LoaiChuKy,DinhDangChuKy,
                         DuLieuChuKy,ChungThuCongKhai,MaBamTaiLieu,MaBamChuKyTruoc,KetQuaXacMinh,
@@ -525,10 +543,10 @@ public static class KySoEndpoints
                     INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,HanhDong,MoTa,TrangThaiTruoc,TrangThaiSau,SoPhienBan)
                     VALUES(@id,@agency,@user,'KY_CO_QUAN',@description,'DA_CAP_SO','DA_KY',@version)",
                     new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,version=doc.PhienBanHienTai,
-                        description=$"Đã ký PDF bước 5/5; số {doc.SoPhatHanh}/{doc.KyHieu}; SHA-256 {hash[..16]}…"},tx);
+                        description=$"Đã ký PDF bước {agencyOrder}/{agencyOrder}; số {doc.SoPhatHanh}/{doc.KyHieu}; SHA-256 {hash[..16]}…"},tx);
                 var json=JsonSerializer.Serialize(new{maVanBan=id,trangThai="DA_KY",loaiChuKy="KY_CO_QUAN",
                     maBan=fileId,so=doc.SoPhatHanh,kyHieu=doc.KyHieu,maBamSha256=hash,hopLeMatMa=true});
-                await GhiBienNhan(cn,tx,actor,request.MaYeuCau,"KY_5",json);
+                await GhiBienNhan(cn,tx,actor,request.MaYeuCau,"KY_"+agencyOrder,json);
                 tx.Commit();return Results.Content(json,"application/json");
             }catch(Exception ex)when(ex is CryptographicException or InvalidDataException){
                 tx.Rollback();XoaTepTam(path);

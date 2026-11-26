@@ -38,6 +38,7 @@ export interface VanBan {
   createdAt: string;
   dueAt?: string;
   version: number;
+  signingSteps?: number;
   to: string[];
   events: SuKien[];
   transfers: ChuyenPhat[];
