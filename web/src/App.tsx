@@ -17,6 +17,7 @@ import HoSoPage from './HoSoPage';
 import DieuHanhVanBanDenPanel from './DieuHanhVanBanDenPanel';
 import ChiTietVanBanDen from './ChiTietVanBanDen';
 import ThongTinTaiKhoan from './ThongTinTaiKhoan';
+import QuanTriHeThong from './QuanTriHeThong';
 
 const DEMO = import.meta.env.VITE_DEMO_MODE !== 'false';
 const APP_TITLE = 'Văn thư số';
@@ -39,6 +40,7 @@ const navigation: Navigation = [
     { id:'giam-sat',label:'Giám sát tiến độ',icon:Clock3,permission:'reports.read' },
   ] },
   { group: 'QUẢN TRỊ', items: [
+    { id:'quan-tri-he-thong',label:'Quản trị hệ thống',icon:ShieldCheck,permission:'agencies.manage' },
     { id:'quan-tri',label:'Quản trị tài khoản',icon:Settings2,permission:'users.manage' },
     { id:'co-cau',label:'Cơ cấu phòng ban',icon:Building2,permission:'departments.manage' },
     { id:'uy-quyen',label:'Ủy quyền ký thay',icon:ShieldCheck,permission:'permissions.manage' },
@@ -49,7 +51,8 @@ const names: Record<Trang, string> = {
   'tong-quan':'Tổng quan', 'van-ban-di':'Quản lý văn bản đi', 'van-ban-den':'Quản lý văn bản đến',
   'cong-viec':'Việc cần xử lý', 'hanh-trinh':'Hành trình văn bản', 'giao-nhan':'Theo dõi giao nhận',
   'ho-so':'Hồ sơ lưu trữ', 'bao-cao':'Báo cáo thống kê', 'giam-sat':'Giám sát tiến độ', 'quan-tri':'Quản trị tài khoản',
-  'co-cau':'Quản lý cơ cấu phòng ban', 'uy-quyen':'Ủy quyền ký thay'
+  'co-cau':'Quản lý cơ cấu phòng ban', 'uy-quyen':'Ủy quyền ký thay',
+  'quan-tri-he-thong':'Quản trị toàn hệ thống'
 };
 
 function defaultDocs(): VanBan[] {
@@ -1643,6 +1646,11 @@ export default function App() {
         <p>Tạo tài khoản, phân công phòng ban và chức vụ. Quản trị viên không mặc nhiên được xem văn bản nghiệp vụ.</p></div></div>
         {!DEMO?<UserAdministration token={token} username={actor.username} canManagePermissions={isAllowed(actor,'permissions.manage')}/>:
           <div className="panel">Chức năng quản trị tài khoản chỉ sử dụng khi kết nối API thật.</div>}</>}
+
+      {page==='quan-tri-he-thong'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ TOÀN HỆ THỐNG</div>
+        <h1>Quản lý cơ quan</h1><p>Tạo cơ quan, cấp tài khoản quản trị và kiểm tra nhật ký kỹ thuật. Không truy cập nội dung văn bản của cơ quan.</p></div></div>
+        {!DEMO?<QuanTriHeThong token={token}/>:
+          <div className="panel">Vui lòng kết nối API thật để quản trị cơ quan.</div>}</>}
 
       {page==='co-cau'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ CƠ QUAN · 0.6.3</div>
         <h1>Cơ cấu phòng ban</h1><p>Thêm, sửa, sắp xếp thứ bậc và quản lý các phòng trực thuộc cơ quan.</p></div></div>
