@@ -17,7 +17,8 @@ public static class QuanTriNguoiDungEndpoints
     ];
 
     private static bool HopLeChucVu(string role,string department) =>
-        role is "LANH_DAO" or "PHO_LANH_DAO" ? department=="LANH_DAO" : department!="LANH_DAO";
+        role is "LANH_DAO" or "PHO_LANH_DAO" or "VAN_THU"
+            ? department=="LANH_DAO" : department!="LANH_DAO";
 
     private static string? LayTenChucVu(string? label) => string.IsNullOrWhiteSpace(label)?null:label.Trim();
 
@@ -37,6 +38,14 @@ public static class QuanTriNguoiDungEndpoints
             new{agency,department,role,excluding},tx);
         return count>0;
     }
+
+    private static async Task<bool> DaCoVanThu(SqlConnection cn,SqlTransaction tx,int agency,int? excluding=null)
+        => await cn.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(DISTINCT n.MaNguoiDung) FROM dbo.NguoiDung n WITH(UPDLOCK,HOLDLOCK)
+            JOIN dbo.NguoiDungVaiTro uv ON uv.MaNguoiDung=n.MaNguoiDung AND uv.MaCoQuan=n.MaCoQuan
+            JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
+            WHERE n.MaCoQuan=@agency AND n.DangHoatDong=1 AND r.MaDinhDanh='VAN_THU'
+              AND (@excluding IS NULL OR n.MaNguoiDung<>@excluding)",new{agency,excluding},tx)>0;
 
     public static void MapQuanTriNguoiDung(this IEndpointRouteBuilder app)
     {
@@ -102,6 +111,9 @@ public static class QuanTriNguoiDungEndpoints
             if(await DaCoCapTruong(cn,tx,actor.MaCoQuan.Value,body.MaPhongBan,body.MaVaiTro)){
                 tx.Rollback();return Results.Conflict(new{message="Đơn vị đã có cấp trưởng đang hoạt động. Hãy chọn cấp phó hoặc điều chỉnh bổ nhiệm hiện tại trước."});
             }
+            if(body.MaVaiTro=="VAN_THU" && await DaCoVanThu(cn,tx,actor.MaCoQuan.Value)){
+                tx.Rollback();return Results.Conflict(new{message="Cơ quan đã có một Văn thư đang hoạt động."});
+            }
             var roleName=await cn.ExecuteScalarAsync<string>("SELECT TenVaiTro FROM dbo.VaiTro WHERE MaVaiTro=@role",new{role},tx);
             try{
                 var userId=await cn.ExecuteScalarAsync<int>(@"
@@ -156,6 +168,9 @@ public static class QuanTriNguoiDungEndpoints
             if(await DaCoCapTruong(cn,tx,actor.MaCoQuan.Value,body.MaPhongBan,body.MaVaiTro,id)){
                 tx.Rollback();return Results.Conflict(new{message="Đơn vị đã có cấp trưởng đang hoạt động."});
             }
+            if(body.MaVaiTro=="VAN_THU" && await DaCoVanThu(cn,tx,actor.MaCoQuan.Value,id)){
+                tx.Rollback();return Results.Conflict(new{message="Cơ quan đã có một Văn thư đang hoạt động."});
+            }
             var roleName=await cn.ExecuteScalarAsync<string>("SELECT TenVaiTro FROM dbo.VaiTro WHERE MaVaiTro=@role",new{role},tx);
             await cn.ExecuteAsync(@"
                 DELETE FROM dbo.NguoiDungVaiTro WHERE MaNguoiDung=@id AND MaCoQuan=@agency;
@@ -180,6 +195,13 @@ public static class QuanTriNguoiDungEndpoints
                 WHERE uv.MaNguoiDung=@id AND uv.MaCoQuan=@agency AND v.MaDinhDanh='AGENCY_ADMIN'",
                 new{id,agency=actor.MaCoQuan},tx);
             if(adminRole>0){tx.Rollback();return Results.Forbid();}
+            if(body.DangHoatDong && await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.NguoiDungVaiTro uv JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
+                WHERE uv.MaNguoiDung=@id AND uv.MaCoQuan=@agency AND r.MaDinhDanh='VAN_THU'",
+                new{id,agency=actor.MaCoQuan},tx)>0 &&
+                await DaCoVanThu(cn,tx,actor.MaCoQuan.Value,id)){
+                tx.Rollback();return Results.Conflict(new{message="Không thể mở tài khoản: cơ quan đã có một Văn thư hoạt động."});
+            }
             var changed=await cn.ExecuteAsync(@"
                 UPDATE dbo.NguoiDung SET DangHoatDong=@enabled
                 WHERE MaNguoiDung=@id AND MaCoQuan=@agency",

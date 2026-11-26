@@ -126,6 +126,9 @@ public static class QuanTriPhongBanEndpoints
                 WHERE MaPhongBan=@id AND MaCoQuan=@agency",new{id,agency=actor.MaCoQuan},tx);
             if(current==null){tx.Rollback();return Results.NotFound();}
             if(current.DangHoatDong==body.DangHoatDong){tx.Commit();return Results.Ok(new{maPhongBan=id,dangHoatDong=body.DangHoatDong});}
+            if(current.MaDinhDanh=="VAN_THU"){
+                tx.Rollback();return Results.Conflict(new{message="Phòng Văn thư là dữ liệu lịch sử; chức vụ Văn thư hiện thuộc Ban lãnh đạo."});
+            }
             if(!body.DangHoatDong){
                 if(current.MaDinhDanh is "LANH_DAO" or "VAN_PHONG" or "VAN_THU"){
                     tx.Rollback();return Results.Conflict(new{message="Không thể ngừng hoạt động phòng hệ thống; quy trình văn bản đang sử dụng mã phòng này."});

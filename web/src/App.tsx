@@ -619,7 +619,7 @@ function DepartmentAdministration({token,onChanged}:{token:string;onChanged:()=>
         <div className="admin-user-actions"><button className="secondary small" disabled={busy||!d.DangHoatDong}
           onClick={()=>act(()=>requestApi(`/admin/departments/${d.MaPhongBan}`,token,{method:'PUT',body:JSON.stringify({
             tenPhongBan:edit.name,thuTuHienThi:edit.order,maPhongBanCha:edit.parent||null})}),'Đã lưu phòng ban.')}>Lưu</button>
-          <button className="secondary small" disabled={busy||['LANH_DAO','VAN_PHONG','VAN_THU'].includes(d.MaDinhDanh)&&d.DangHoatDong}
+          <button className="secondary small" disabled={busy||d.MaDinhDanh==='VAN_THU'||['LANH_DAO','VAN_PHONG'].includes(d.MaDinhDanh)&&d.DangHoatDong}
             onClick={()=>act(()=>requestApi(`/admin/departments/${d.MaPhongBan}/status`,token,{method:'PUT',body:JSON.stringify({
               dangHoatDong:!d.DangHoatDong})}),d.DangHoatDong?'Đã ngừng hoạt động phòng.':'Đã mở lại phòng.')}>{d.DangHoatDong?'Ngừng':'Mở lại'}</button>
         </div>
@@ -655,8 +655,8 @@ function UserAdministration({token,username}:{token:string;username:string}){
     setDepartment(current=>{
       const id=current||ds[0]?.MaPhongBan||0;
       const leader=ds.find(d=>d.MaPhongBan===id)?.MaDinhDanh==='LANH_DAO';
-      setRole(currentRole=>leader?(currentRole==='PHO_LANH_DAO'?currentRole:'LANH_DAO'):
-        ['LANH_DAO','PHO_LANH_DAO'].includes(currentRole)?'CHUYEN_VIEN':currentRole);
+      setRole(currentRole=>leader?(['PHO_LANH_DAO','VAN_THU'].includes(currentRole)?currentRole:'LANH_DAO'):
+        ['LANH_DAO','PHO_LANH_DAO','VAN_THU'].includes(currentRole)?'CHUYEN_VIEN':currentRole);
       return id;
     });
     setEdits(Object.fromEntries(us.map(u=>[u.MaNguoiDung,{department:u.MaPhongBan,role:u.MaVaiTro,positionName:u.ChucVu}])));
@@ -668,8 +668,8 @@ function UserAdministration({token,username}:{token:string;username:string}){
   };
   const validRoles=(departmentId:number)=>{
     const leadership=departments.find(d=>d.MaPhongBan===departmentId)?.MaDinhDanh==='LANH_DAO';
-    return roles.filter(r=>leadership?['LANH_DAO','PHO_LANH_DAO'].includes(r.MaDinhDanh??''):
-      !['LANH_DAO','PHO_LANH_DAO'].includes(r.MaDinhDanh??''));
+    return roles.filter(r=>leadership?['LANH_DAO','PHO_LANH_DAO','VAN_THU'].includes(r.MaDinhDanh??''):
+      !['LANH_DAO','PHO_LANH_DAO','VAN_THU'].includes(r.MaDinhDanh??''));
   };
   const changeDepartment=(id:number,currentRole:string)=>{
     const available=validRoles(id);return available.some(r=>r.MaDinhDanh===currentRole)?currentRole:available[0]?.MaDinhDanh??'';
