@@ -582,7 +582,9 @@ function SignerPicker({doc,token,onClose,onSubmit}:{doc:VanBan;token:string;onCl
     <h3>Chọn người được phép ký văn bản</h3>
     <p className="fine-note">Người soạn đã ký bước 1. Chọn trưởng hoặc phó trưởng đơn vị được phân quyền ký nháy (bước 2); chọn lãnh đạo trưởng hoặc cấp phó được phân quyền ký chính thức (bước 3). Văn thư ký số cơ quan cuối cùng (bước 4). Danh sách được máy chủ lọc theo cơ quan, phòng ban và vai trò.</p>
     {loading?<p>Đang tải danh sách người ký...</p>:<>
-      <label>{role==='TRUONG_VAN_PHONG'?'Trưởng / phó trưởng văn phòng ký nháy':'Trưởng / phó trưởng phòng ký nháy'}
+      <label>{role==='TRUONG_VAN_PHONG'?'Trưởng văn phòng ký nháy':
+        role==='PHO_VAN_PHONG'?'Phó trưởng văn phòng ký nháy':
+        role==='PHO_PHONG'?'Phó trưởng phòng ký nháy':'Trưởng phòng / người được ủy quyền ký nháy'}
         <select value={reviewer} onChange={e=>setReviewer(Number(e.target.value))}>
           {reviewers.map(p=><option key={p.MaNguoiDung} value={p.MaNguoiDung}>{p.HoTen} — {p.VaiTroKy} — {p.TenPhongBan}</option>)}
         </select></label>
@@ -590,7 +592,7 @@ function SignerPicker({doc,token,onClose,onSubmit}:{doc:VanBan;token:string;onCl
         <select value={leader} onChange={e=>setLeader(Number(e.target.value))}>
           {leaders.map(p=><option key={p.MaNguoiDung} value={p.MaNguoiDung}>{p.HoTen} — {p.VaiTroKy}</option>)}
         </select></label>
-      {(!reviewers.length||!leaders.length)&&<div className="form-error">Chưa có người ký phù hợp. Quản trị viên cần cấu hình trưởng đơn vị và lãnh đạo trước khi trình duyệt.</div>}
+      {(!reviewers.length||!leaders.length)&&<div className="form-error">Chưa có người ký phù hợp và khác người soạn. Nếu trưởng phòng soạn, cần có cấp phó được gán quyền; nếu phó trưởng phòng soạn, có thể chọn trưởng hoặc cấp phó khác cùng phòng. Hãy nhờ quản trị viên bổ nhiệm đúng vai trò trước khi trình duyệt.</div>}
     </>}
     {error&&<div className="form-error">{error}</div>}
     <div className="signature-step-actions"><button className="secondary" onClick={onClose}>Hủy</button>
