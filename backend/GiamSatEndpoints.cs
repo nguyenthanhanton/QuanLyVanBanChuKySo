@@ -143,13 +143,20 @@ public static class GiamSatEndpoints
                     AND q.ThoiDiemThuHoi IS NOT NULL
                   UNION ALL
                   SELECT CONVERT(NVARCHAR(80),l.MaLichSu),'SU_KIEN',l.MaVanBan,v.MaNoiBo,
-                         CASE WHEN l.HanhDong='PHAT_HANH' THEN N'Văn bản đã phát hành'
-                              ELSE N'Văn bản đã được tiếp nhận' END,l.ThoiDiem,'MOI'
+                         N'Văn bản đã phát hành',l.ThoiDiem,'MOI'
                   FROM dbo.LichSuVanBan l JOIN dbo.VanBan v ON v.MaVanBan=l.MaVanBan
-                  WHERE l.MaCoQuan=@agency AND l.HanhDong IN ('PHAT_HANH','TIEP_NHAN')
+                  WHERE l.MaCoQuan=@agency AND l.HanhDong='PHAT_HANH'
                     AND (v.MaNguoiTao=@user OR (v.DoMat='THUONG' AND EXISTS(
                       SELECT 1 FROM dbo.NguoiDungVaiTro uv JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
                       WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency AND r.MaDinhDanh='VAN_THU')))
+                  UNION ALL
+                  SELECT CONVERT(NVARCHAR(80),h.MaLichSu),'SU_KIEN_DEN',d.MaVanBanDen,d.TieuDe,
+                         N'Văn bản đã được tiếp nhận',h.ThoiDiem,'MOI'
+                  FROM dbo.LichSuVanBan h
+                  JOIN dbo.VanBanDen d ON d.MaLuotChuyen=h.MaLuotChuyen AND d.MaCoQuanNhan=@agency
+                  WHERE h.MaCoQuan=@agency AND h.HanhDong='TIEP_NHAN'
+                    AND EXISTS(SELECT 1 FROM dbo.NguoiDungVaiTro uv JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
+                      WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency AND r.MaDinhDanh='VAN_THU')
                   UNION ALL
                   SELECT CONVERT(NVARCHAR(80),d.MaVanBanDen),'DEN_CHO_TRINH',d.MaVanBanDen,d.TieuDe,
                          N'Văn bản đến chờ trình lãnh đạo',d.ThoiDiemTiepNhan,'MOI'
@@ -199,10 +206,13 @@ public static class GiamSatEndpoints
                     AND (a.MaNguoiChuTri=@user OR EXISTS(SELECT 1 FROM dbo.NguoiPhoiHopVanBanDen h
                       WHERE h.MaVanBanDen=a.MaVanBanDen AND h.MaPhongBan=a.MaPhongBan AND h.MaNguoiDung=@user))
                 )
-                SELECT TOP 100 N.*,CASE WHEN r.MaThamChieu IS NULL THEN CAST(0 AS BIT)
-                       ELSE CAST(1 AS BIT) END AS DaDoc
-                FROM N LEFT JOIN dbo.ThongBaoDaDoc r ON r.MaCoQuan=@agency AND r.MaNguoiDung=@user
-                   AND r.LoaiThongBao=N.LoaiThongBao AND r.MaThamChieu=N.MaThamChieu
+                SELECT TOP 100 N.*,CAST(CASE WHEN EXISTS(
+                    SELECT 1 FROM dbo.ThongBaoDaDoc r
+                    WHERE r.MaCoQuan=@agency AND r.MaNguoiDung=@user AND r.MaThamChieu=N.MaThamChieu
+                      AND (r.LoaiThongBao=N.LoaiThongBao OR
+                           (N.LoaiThongBao='SU_KIEN_DEN' AND r.LoaiThongBao='SU_KIEN')))
+                    THEN 1 ELSE 0 END AS BIT) AS DaDoc
+                FROM N
                 ORDER BY N.ThoiDiem DESC",
                 new{agency=actor.MaCoQuan,user=actor.MaNguoiDung});
             return Results.Ok(rows);
@@ -213,7 +223,7 @@ public static class GiamSatEndpoints
             var actor=await permission.NguoiHienTai(http);
             if(actor?.MaCoQuan is null)return Results.Unauthorized();
             if(string.IsNullOrWhiteSpace(body.MaThamChieu) || body.MaThamChieu.Length>80 ||
-               !new[]{"TAC_VU","TRA_SUA","UY_QUYEN","THU_HOI","SU_KIEN",
+               !new[]{"TAC_VU","TRA_SUA","UY_QUYEN","THU_HOI","SU_KIEN","SU_KIEN_DEN",
                    "DEN_CHO_TRINH","DEN_CHO_GIAO","DEN_PHONG","DEN_CA_NHAN"}.Contains(body.LoaiThongBao))
                 return Results.BadRequest();
             using var cn=db.Open();
@@ -234,10 +244,16 @@ public static class GiamSatEndpoints
                     AND l.MaCoQuan=@agency AND l.HanhDong='TRA_SUA' AND v.MaNguoiTao=@user) THEN 1
                   WHEN @type='SU_KIEN' AND EXISTS(SELECT 1 FROM dbo.LichSuVanBan l
                     JOIN dbo.VanBan v ON v.MaVanBan=l.MaVanBan WHERE l.MaLichSu=TRY_CONVERT(BIGINT,@id)
-                    AND l.MaCoQuan=@agency AND l.HanhDong IN ('PHAT_HANH','TIEP_NHAN')
+                    AND l.MaCoQuan=@agency AND l.HanhDong='PHAT_HANH'
                     AND (v.MaNguoiTao=@user OR (v.DoMat='THUONG' AND EXISTS(
                       SELECT 1 FROM dbo.NguoiDungVaiTro uv JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
                       WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency AND r.MaDinhDanh='VAN_THU')))) THEN 1
+                  WHEN @type='SU_KIEN_DEN' AND EXISTS(SELECT 1 FROM dbo.LichSuVanBan h
+                    JOIN dbo.VanBanDen d ON d.MaLuotChuyen=h.MaLuotChuyen AND d.MaCoQuanNhan=@agency
+                    JOIN dbo.NguoiDungVaiTro uv ON uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency
+                    JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro AND r.MaDinhDanh='VAN_THU'
+                    WHERE h.MaLichSu=TRY_CONVERT(BIGINT,@id) AND h.MaCoQuan=@agency
+                      AND h.HanhDong='TIEP_NHAN') THEN 1
                   WHEN @type='DEN_CHO_TRINH' AND EXISTS(SELECT 1 FROM dbo.VanBanDen d
                     JOIN dbo.NguoiDungVaiTro ur ON ur.MaNguoiDung=@user AND ur.MaCoQuan=@agency
                     JOIN dbo.VaiTro r ON r.MaVaiTro=ur.MaVaiTro AND r.MaDinhDanh='VAN_THU'
