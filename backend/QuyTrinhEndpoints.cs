@@ -109,7 +109,7 @@ public static class QuyTrinhEndpoints
                     role,deputyRole,requiredRole,reviewerDepartment,clerkAuthor});
             return Results.Ok(new{nguoiKyNhay=reviewers,nguoiKyLanhDao=leaders,
                 vaiTroKyNhay=requiredRole??role,phongBanNguoiSoan=department,
-                boQuaKyNhay=leaderAuthor,soBuocKy=leaderAuthor?3:4});
+                vanThuSoan=clerkAuthor,boQuaKyNhay=leaderAuthor,soBuocKy=leaderAuthor?3:4});
         }).RequireAuthorization();
 
         app.MapGet("/api/v1/workqueue",async(HttpContext http,PhanQuyen permission,Database db)=>{
