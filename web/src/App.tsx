@@ -18,10 +18,12 @@ import DieuHanhVanBanDenPanel from './DieuHanhVanBanDenPanel';
 import ChiTietVanBanDen from './ChiTietVanBanDen';
 import ThongTinTaiKhoan from './ThongTinTaiKhoan';
 import QuanTriHeThong from './QuanTriHeThong';
+import ThongTinCoQuan from './ThongTinCoQuan';
 
 const DEMO = import.meta.env.VITE_DEMO_MODE !== 'false';
 const APP_TITLE = 'Văn thư số';
 const storedDocsKey = 'qlvb-demo-documents-v1';
+const sessionKey = 'qlvb-session-tab-v1';
 const field = (object: Record<string,unknown>, key:string):unknown => object[key] ?? object[key[0].toLowerCase()+key.slice(1)];
 
 type Navigation = { group: string; items: { id: Trang; label: string; icon: LucideIcon; permission: string }[] }[];
@@ -54,6 +56,19 @@ const names: Record<Trang, string> = {
   'co-cau':'Quản lý cơ cấu phòng ban', 'uy-quyen':'Ủy quyền ký thay',
   'quan-tri-he-thong':'Quản trị toàn hệ thống'
 };
+
+function loadStoredSession():{actor:Actor;token:string;page:Trang}|null {
+  try{
+    const raw=sessionStorage.getItem(sessionKey);
+    if(!raw)return null;
+    const data=JSON.parse(raw) as {actor?:Actor;token?:string;page?:Trang;demo?:boolean};
+    if(data.demo!==DEMO||!data.actor||typeof data.actor.username!=='string'||
+       !Array.isArray(data.actor.capabilities)||(!DEMO&&!data.token))return null;
+    const allowedPage=data.page&&Object.prototype.hasOwnProperty.call(names,data.page)?data.page:
+      data.actor.capabilities.includes('agencies.manage')?'quan-tri-he-thong':'tong-quan';
+    return {actor:data.actor,token:data.token??'',page:allowedPage};
+  }catch{return null;}
+}
 
 function defaultDocs(): VanBan[] {
   try {
@@ -1139,9 +1154,11 @@ function EmptyView({title,message,icon:Icon}:{title:string;message:string;icon:L
 }
 
 export default function App() {
-  const [actor,setActor]=useState<Actor|null>(null);
-  const [token,setToken]=useState('');
-  const [page,setPage]=useState<Trang>('tong-quan');
+  const [storedSession]=useState(loadStoredSession);
+  const [actor,setActor]=useState<Actor|null>(storedSession?.actor??null);
+  const [token,setToken]=useState(storedSession?.token??'');
+  const [page,setPage]=useState<Trang>(storedSession?.page??'tong-quan');
+  const [restoring,setRestoring]=useState(Boolean(storedSession&&!DEMO));
   const [docs,setDocs]=useState<VanBan[]>(defaultDocs);
   const [selected,setSelected]=useState<string|null>(null);
   const [journeyPick,setJourneyPick]=useState<string|null>('demo-001');
@@ -1193,6 +1210,46 @@ export default function App() {
   },[token,page]);
   const [agencyOptions,setAgencyOptions]=useState<{value:string;label:string}[]>(DEMO?[{value:'Cơ quan B',label:'Cơ quan B'},{value:'Cơ quan C',label:'Cơ quan C'}]:[]);
   const [error,setError]=useState('');
+
+  useEffect(()=>{
+    if(DEMO||!storedSession?.token){setRestoring(false);return;}
+    let active=true;
+    const restore=async()=>{
+      try{
+        const data=await requestApi('/auth/me',storedSession.token) as Record<string,unknown>;
+        if(!active)return;
+        const currentCaps=(field(data,'capabilities') as string[])??[];
+        const updated:Actor={...storedSession.actor,
+          name:String(field(data,'HoTen')??storedSession.actor.name),capabilities:currentCaps};
+        setActor(updated);
+        const available=navigation.flatMap(g=>g.items).some(i=>i.id===storedSession.page&&currentCaps.includes(i.permission));
+        if(!available){const first=navigation.flatMap(g=>g.items).find(i=>currentCaps.includes(i.permission));
+          setPage(first?.id??'tong-quan');}
+        try{
+          const profile=await requestApi('/auth/profile',storedSession.token) as Record<string,unknown>;
+          if(active)setActor(old=>old?{...old,
+            agency:String(field(profile,'TenCoQuan')??old.agency),position:String(field(profile,'ChucVu')??old.position)}:old);
+        }catch{/* Phiên vẫn hợp lệ; tiếp tục với thông tin cơ bản. */}
+        if(currentCaps.includes('documents.read'))await refresh(storedSession.token,currentCaps);
+      }catch(err){
+        if(!active)return;
+        const message=(err as Error).message;
+        if(message.includes('401')||message.includes('hết hạn')||message.includes('đăng nhập')){
+          sessionStorage.removeItem(sessionKey);setActor(null);setToken('');
+          setPage('tong-quan');
+        }else setError(`Không thể khôi phục dữ liệu phiên: ${message}`);
+      }finally{if(active)setRestoring(false);}
+    };
+    void restore();
+    return()=>{active=false;};
+  },[]);
+  useEffect(()=>{
+    if(restoring)return;
+    try{
+      if(actor&&(DEMO||token))sessionStorage.setItem(sessionKey,JSON.stringify({actor,token,page,demo:DEMO}));
+      else sessionStorage.removeItem(sessionKey);
+    }catch{/* Storage disabled: app remains usable until reload. */}
+  },[actor,token,page,restoring]);
 
   useEffect(()=>{if(DEMO)localStorage.setItem(storedDocsKey,JSON.stringify(docs));},[docs]);
 
@@ -1350,7 +1407,8 @@ export default function App() {
     if(caps.includes('documents.read'))await refresh(body.accessToken,caps);
   };
 
-  const logout=()=>{setActor(null);setToken('');setSelected(null);setQuery('');setProfileMenu(false);setProfileOpen(false);setError('');};
+  const logout=()=>{try{sessionStorage.removeItem(sessionKey);}catch{/* storage disabled */}
+    setActor(null);setToken('');setSelected(null);setQuery('');setProfileMenu(false);setProfileOpen(false);setError('');};
   const go=(next:Trang)=>{if(!menuItems.find(i=>i.id===next))return;setPage(next);setSelected(null);setIncomingFocus('');setFilter('ALL');setQuery('');setMenuOpen(false);};
   const create=async(input:{title:string;excerpt:string;to:string[];urgency:VanBan['urgency'];mainFile:File;files:File[]})=>{
     if(!actor)return;
@@ -1415,6 +1473,7 @@ export default function App() {
     }
   };
 
+  if(restoring)return <div className="login-wrap"><div className="panel" style={{padding:28}}>Đang xác thực và khôi phục phiên đăng nhập...</div></div>;
   if(!actor)return <Login onLogin={login}/>;
   const hasDocs=isAllowed(actor,'documents.read');
   const urgent=visibleDocs.filter(d=>d.urgency!=='THUONG'&&!['HOAN_THANH'].includes(d.status));
@@ -1644,6 +1703,8 @@ export default function App() {
 
       {page==='quan-tri'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ CƠ QUAN · 0.6.1</div><h1>Quản trị tài khoản</h1>
         <p>Tạo tài khoản, phân công phòng ban và chức vụ. Quản trị viên không mặc nhiên được xem văn bản nghiệp vụ.</p></div></div>
+        {!DEMO&&isAllowed(actor,'settings.manage')&&<ThongTinCoQuan token={token}
+          onNameChanged={name=>setActor(old=>old?{...old,agency:name}:old)}/>}
         {!DEMO?<UserAdministration token={token} username={actor.username} canManagePermissions={isAllowed(actor,'permissions.manage')}/>:
           <div className="panel">Chức năng quản trị tài khoản chỉ sử dụng khi kết nối API thật.</div>}</>}
 
