@@ -14,6 +14,7 @@ import type { Actor, ChuyenPhat, SuKien, Trang, TrangThai, VanBan } from './type
 import { formatDate, stageLabel, transferLabel } from './types';
 import SignaturePlacement, { type SignaturePosition } from './SignaturePlacement';
 import HoSoPage from './HoSoPage';
+import DieuHanhVanBanDenPanel from './DieuHanhVanBanDenPanel';
 
 const DEMO = import.meta.env.VITE_DEMO_MODE !== 'false';
 const APP_TITLE = 'Văn thư số';
@@ -72,6 +73,7 @@ function Status({ status, small=false }: { status: TrangThai | ChuyenPhat['statu
 }
 
 function isAllowed(user: Actor | null, permission: string) {
+  if(permission==='incoming.manage' && user?.capabilities.includes('workflow.decide'))return true;
   return user?.capabilities.includes(permission) ?? false;
 }
 
@@ -1469,7 +1471,10 @@ export default function App() {
         <div className="page-intro compact"><div><div className="overline">QUẢN LÝ NGHIỆP VỤ</div><h1>{names[page]}</h1><p>{page==='van-ban-di'?'Soạn thảo, trình duyệt và theo dõi văn bản phát hành.':'Tiếp nhận và xử lý văn bản gửi đến đơn vị.'}</p></div>
           {page==='van-ban-di'&&isAllowed(actor,'documents.manage')&&<button className="primary" onClick={()=>setCreateOpen(true)}><Plus size={18}/>Tạo văn bản mới</button>}</div>
         <div className="mini-stats"><span><Files size={17}/>Tổng: <strong>{filtered.length}</strong></span><span><Clock3 size={17}/>Đang xử lý: <strong>{filtered.filter(d=>d.status!=='HOAN_THANH').length}</strong></span><span><CheckCircle2 size={17}/>Hoàn thành: <strong>{filtered.filter(d=>d.status==='HOAN_THANH').length}</strong></span></div>
-        {!DEMO&&page==='van-ban-den'?<LiveDeliveries token={token} direction="in" onUpdated={updateAfterOperation}/>:
+        {!DEMO&&page==='van-ban-den'?<>
+          <DieuHanhVanBanDenPanel token={token} onUpdated={updateAfterOperation}/>
+          {actor?.capabilities.includes('incoming.manage')&&<LiveDeliveries token={token} direction="in" onUpdated={updateAfterOperation}/>}
+        </>:
           documentList(page==='van-ban-di'?'Danh sách văn bản đi':'Danh sách văn bản đến')}
       </>}
 
