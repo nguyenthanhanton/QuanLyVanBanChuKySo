@@ -1,22 +1,31 @@
 using Dapper;
 using Microsoft.Data.SqlClient;
 
-public sealed record TaoTaiKhoan(string TenDangNhap,string HoTen,string MatKhau,int MaPhongBan,string MaVaiTro);
-public sealed record PhanCongTaiKhoan(int MaPhongBan,string MaVaiTro);
+public sealed record TaoTaiKhoan(string TenDangNhap,string HoTen,string MatKhau,int MaPhongBan,string MaVaiTro,string? TenChucVu);
+public sealed record PhanCongTaiKhoan(int MaPhongBan,string MaVaiTro,string? TenChucVu);
 public sealed record DoiTrangThaiTaiKhoan(bool DangHoatDong);
 
 public static class QuanTriNguoiDungEndpoints
 {
+    private sealed class PhongBanChucVu
+    {
+        public int MaPhongBan {get;set;}
+        public string MaDinhDanh {get;set;}="";
+    }
     private static readonly string[] VaiTroNghiepVu = [
-        "VAN_THU","CHUYEN_VIEN","TRUONG_PHONG","PHO_PHONG",
-        "TRUONG_VAN_PHONG","PHO_VAN_PHONG","LANH_DAO","PHO_LANH_DAO"
+        "VAN_THU","CHUYEN_VIEN","TRUONG_PHONG","PHO_PHONG","LANH_DAO","PHO_LANH_DAO"
     ];
+
+    private static bool HopLeChucVu(string role,string department) =>
+        role is "LANH_DAO" or "PHO_LANH_DAO" ? department=="LANH_DAO" : department!="LANH_DAO";
+
+    private static string? LayTenChucVu(string? label) => string.IsNullOrWhiteSpace(label)?null:label.Trim();
 
     // One chief agency leader; one head per advisory department; one office head per agency.
     private static async Task<bool> DaCoCapTruong(System.Data.IDbConnection cn,
         System.Data.IDbTransaction tx,int agency,int department,string role,int? excluding=null)
     {
-        if(role is not ("LANH_DAO" or "TRUONG_PHONG" or "TRUONG_VAN_PHONG"))return false;
+        if(role is not ("LANH_DAO" or "TRUONG_PHONG"))return false;
         var count=await cn.ExecuteScalarAsync<int>(@"
             SELECT COUNT(DISTINCT n.MaNguoiDung)
             FROM dbo.NguoiDung n WITH(UPDLOCK,HOLDLOCK)
@@ -75,16 +84,21 @@ public static class QuanTriNguoiDungEndpoints
                 return Results.BadRequest(new{message="Tên đăng nhập cần 4–100 ký tự không dấu (a-z, 0-9, _, ., -)."});
             if(fullname.Length is < 3 or > 150 || string.IsNullOrWhiteSpace(body.MatKhau) || body.MatKhau.Length<12)
                 return Results.BadRequest(new{message="Họ tên cần 3–150 ký tự; mật khẩu mới phải có ít nhất 12 ký tự."});
-            if(!VaiTroNghiepVu.Contains(body.MaVaiTro))return Results.BadRequest(new{message="Vai trò nghiệp vụ không hợp lệ."});
+            if(!VaiTroNghiepVu.Contains(body.MaVaiTro))return Results.BadRequest(new{message="Chức vụ không hợp lệ."});
+            var title=LayTenChucVu(body.TenChucVu);
+            if(title?.Length>150)return Results.BadRequest(new{message="Tên gọi chức vụ tối đa 150 ký tự."});
             using var cn=db.Open();await cn.OpenAsync();
             using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
             var role=await cn.ExecuteScalarAsync<int?>("SELECT MaVaiTro FROM dbo.VaiTro WHERE MaDinhDanh=@name",
                 new{name=body.MaVaiTro},tx);
-            var department=await cn.ExecuteScalarAsync<int?>(@"
-                SELECT MaPhongBan FROM dbo.PhongBan WHERE MaCoQuan=@agency
+            var department=await cn.QuerySingleOrDefaultAsync<PhongBanChucVu>(@"
+                SELECT MaPhongBan,MaDinhDanh FROM dbo.PhongBan WHERE MaCoQuan=@agency
                     AND MaPhongBan=@department AND DangHoatDong=1",
                 new{agency=actor.MaCoQuan,department=body.MaPhongBan},tx);
-            if(role==null || department==null){tx.Rollback();return Results.BadRequest(new{message="Phòng ban hoặc vai trò chưa được cấu hình."});}
+            if(role==null || department==null){tx.Rollback();return Results.BadRequest(new{message="Phòng ban hoặc chức vụ chưa được cấu hình."});}
+            if(!HopLeChucVu(body.MaVaiTro,department.MaDinhDanh)){
+                tx.Rollback();return Results.BadRequest(new{message="Chức vụ lãnh đạo cơ quan chỉ thuộc Ban lãnh đạo; các phòng khác sử dụng chức vụ phòng ban."});
+            }
             if(await DaCoCapTruong(cn,tx,actor.MaCoQuan.Value,body.MaPhongBan,body.MaVaiTro)){
                 tx.Rollback();return Results.Conflict(new{message="Đơn vị đã có cấp trưởng đang hoạt động. Hãy chọn cấp phó hoặc điều chỉnh bổ nhiệm hiện tại trước."});
             }
@@ -95,7 +109,7 @@ public static class QuanTriNguoiDungEndpoints
                     VALUES(@agency,@department,@username,@hash,@fullname,@position);
                     SELECT CAST(SCOPE_IDENTITY() AS INT);",
                     new{agency=actor.MaCoQuan,department=body.MaPhongBan,username,
-                        hash=MatKhau.TaoBam(body.MatKhau),fullname,position=roleName},tx);
+                        hash=MatKhau.TaoBam(body.MatKhau),fullname,position=title??roleName},tx);
                 await cn.ExecuteAsync(@"
                     INSERT dbo.NguoiDungVaiTro(MaNguoiDung,MaVaiTro,MaCoQuan)
                     VALUES(@userId,@role,@agency);
@@ -114,7 +128,9 @@ public static class QuanTriNguoiDungEndpoints
             var(actor,error)=await permission.YeuCau(http,"users.manage");
             if(error!=null)return error;
             if(actor!.MaCoQuan is null || actor.MaNguoiDung==id)return Results.Forbid();
-            if(!VaiTroNghiepVu.Contains(body.MaVaiTro))return Results.BadRequest(new{message="Vai trò không hợp lệ."});
+            if(!VaiTroNghiepVu.Contains(body.MaVaiTro))return Results.BadRequest(new{message="Chức vụ không hợp lệ."});
+            var title=LayTenChucVu(body.TenChucVu);
+            if(title?.Length>150)return Results.BadRequest(new{message="Tên gọi chức vụ tối đa 150 ký tự."});
             using var cn=db.Open();await cn.OpenAsync();
             using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
             var userId=await cn.ExecuteScalarAsync<int?>(@"
@@ -127,13 +143,16 @@ public static class QuanTriNguoiDungEndpoints
                 WHERE uv.MaNguoiDung=@id AND uv.MaCoQuan=@agency AND v.MaDinhDanh='AGENCY_ADMIN'",
                 new{id,agency=actor.MaCoQuan},tx);
             if(adminRole>0){tx.Rollback();return Results.Forbid();}
-            var department=await cn.ExecuteScalarAsync<int?>(@"
-                SELECT MaPhongBan FROM dbo.PhongBan WHERE MaPhongBan=@department
+            var department=await cn.QuerySingleOrDefaultAsync<PhongBanChucVu>(@"
+                SELECT MaPhongBan,MaDinhDanh FROM dbo.PhongBan WHERE MaPhongBan=@department
                   AND MaCoQuan=@agency AND DangHoatDong=1",
                 new{department=body.MaPhongBan,agency=actor.MaCoQuan},tx);
             var role=await cn.ExecuteScalarAsync<int?>("SELECT MaVaiTro FROM dbo.VaiTro WHERE MaDinhDanh=@role",
                 new{role=body.MaVaiTro},tx);
             if(department==null || role==null){tx.Rollback();return Results.BadRequest(new{message="Phòng ban hoặc vai trò không hợp lệ."});}
+            if(!HopLeChucVu(body.MaVaiTro,department.MaDinhDanh)){
+                tx.Rollback();return Results.BadRequest(new{message="Chức vụ không phù hợp với phòng ban được chọn."});
+            }
             if(await DaCoCapTruong(cn,tx,actor.MaCoQuan.Value,body.MaPhongBan,body.MaVaiTro,id)){
                 tx.Rollback();return Results.Conflict(new{message="Đơn vị đã có cấp trưởng đang hoạt động."});
             }
@@ -144,7 +163,7 @@ public static class QuanTriNguoiDungEndpoints
                 INSERT dbo.NguoiDungVaiTro(MaNguoiDung,MaVaiTro,MaCoQuan) VALUES(@id,@role,@agency);
                 INSERT dbo.NhatKyHeThong(MaCoQuan,MaNguoiDung,LoaiNhatKy,HanhDong,MoTa)
                 VALUES(@agency,@actor,'NGHIEP_VU','PHAN_CONG_VAI_TRO',@description)",
-                new{id,agency=actor.MaCoQuan,department=body.MaPhongBan,role,position=roleName,
+                new{id,agency=actor.MaCoQuan,department=body.MaPhongBan,role,position=title??roleName,
                     actor=actor.MaNguoiDung,description=$"Gán {body.MaVaiTro} cho tài khoản {id}, phòng {body.MaPhongBan}."},tx);
             tx.Commit();return Results.Ok(new{maNguoiDung=id,maPhongBan=body.MaPhongBan,maVaiTro=body.MaVaiTro});
         });

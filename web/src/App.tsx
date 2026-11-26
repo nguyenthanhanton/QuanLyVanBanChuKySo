@@ -554,7 +554,7 @@ type SigningChoice={maNguoiKyNhay:number;maNguoiKyLanhDao:number};
 type SignerOption={MaNguoiDung:number;HoTen:string;ChucVu:string;TenPhongBan:string;VaiTroKy:string};
 
 type AdminUser={MaNguoiDung:number;TenDangNhap:string;HoTen:string;TenPhongBan:string;
-  MaPhongBan:number;MaVaiTro:string;DangHoatDong:boolean};
+  MaPhongBan:number;MaVaiTro:string;ChucVu:string;DangHoatDong:boolean};
 type AdminOption={MaDinhDanh?:string;TenVaiTro?:string;MaPhongBan?:number;TenPhongBan?:string};
 function UserAdministration({token,username}:{token:string;username:string}){
   const [users,setUsers]=useState<AdminUser[]>([]);
@@ -562,68 +562,89 @@ function UserAdministration({token,username}:{token:string;username:string}){
   const [roles,setRoles]=useState<AdminOption[]>([]);
   const [name,setName]=useState('');const [login,setLogin]=useState('');
   const [password,setPassword]=useState('');const [department,setDepartment]=useState(0);
-  const [role,setRole]=useState('CHUYEN_VIEN');
-  const [edits,setEdits]=useState<Record<number,{department:number;role:string}>>({});
+  const [role,setRole]=useState('CHUYEN_VIEN');const [positionName,setPositionName]=useState('');
+  const [edits,setEdits]=useState<Record<number,{department:number;role:string;positionName:string}>>({});
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [message,setMessage]=useState('');
   const load=async()=>{
     const [options,accounts]=await Promise.all([
       requestApi('/admin/options',token),requestApi('/admin/users',token)
     ]);
     const ds=(field(options,'phongBan') as Record<string,unknown>[]).map(x=>({
-      MaPhongBan:Number(field(x,'MaPhongBan')),TenPhongBan:String(field(x,'TenPhongBan'))}));
+      MaPhongBan:Number(field(x,'MaPhongBan')),TenPhongBan:String(field(x,'TenPhongBan')),
+      MaDinhDanh:String(field(x,'MaDinhDanh'))}));
     const rs=(field(options,'vaiTro') as Record<string,unknown>[]).map(x=>({
       MaDinhDanh:String(field(x,'MaDinhDanh')),TenVaiTro:String(field(x,'TenVaiTro'))}));
     const us=(accounts as Record<string,unknown>[]).map(x=>({
       MaNguoiDung:Number(field(x,'MaNguoiDung')),TenDangNhap:String(field(x,'TenDangNhap')),
       HoTen:String(field(x,'HoTen')),TenPhongBan:String(field(x,'TenPhongBan')??''),
       MaPhongBan:Number(field(x,'MaPhongBan')??0),MaVaiTro:String(field(x,'MaVaiTro')??''),
+      ChucVu:String(field(x,'ChucVu')??''),
       DangHoatDong:Boolean(field(x,'DangHoatDong'))}));
     setDepartments(ds);setRoles(rs);setUsers(us);
-    setDepartment(current=>current||ds[0]?.MaPhongBan||0);
-    setEdits(Object.fromEntries(us.map(u=>[u.MaNguoiDung,{department:u.MaPhongBan,role:u.MaVaiTro}])));
+    setDepartment(current=>{
+      const id=current||ds[0]?.MaPhongBan||0;
+      const leader=ds.find(d=>d.MaPhongBan===id)?.MaDinhDanh==='LANH_DAO';
+      setRole(currentRole=>leader?(currentRole==='PHO_LANH_DAO'?currentRole:'LANH_DAO'):
+        ['LANH_DAO','PHO_LANH_DAO'].includes(currentRole)?'CHUYEN_VIEN':currentRole);
+      return id;
+    });
+    setEdits(Object.fromEntries(us.map(u=>[u.MaNguoiDung,{department:u.MaPhongBan,role:u.MaVaiTro,positionName:u.ChucVu}])));
   };
   useEffect(()=>{load().catch(e=>setError((e as Error).message));},[token]);
   const action=async(fn:()=>Promise<unknown>,success:string)=>{
     setBusy(true);setError('');setMessage('');
     try{await fn();await load();setMessage(success);}catch(e){setError((e as Error).message);}finally{setBusy(false);}
   };
+  const validRoles=(departmentId:number)=>{
+    const leadership=departments.find(d=>d.MaPhongBan===departmentId)?.MaDinhDanh==='LANH_DAO';
+    return roles.filter(r=>leadership?['LANH_DAO','PHO_LANH_DAO'].includes(r.MaDinhDanh??''):
+      !['LANH_DAO','PHO_LANH_DAO'].includes(r.MaDinhDanh??''));
+  };
+  const changeDepartment=(id:number,currentRole:string)=>{
+    const available=validRoles(id);return available.some(r=>r.MaDinhDanh===currentRole)?currentRole:available[0]?.MaDinhDanh??'';
+  };
+  const roleLabel=(r:string)=>roles.find(item=>item.MaDinhDanh===r)?.TenVaiTro??r;
   return <div className="user-admin">
     <section className="panel admin-create"><h3>Thêm tài khoản vào cơ quan</h3>
       <p className="subtle">Chỉ quản trị viên cơ quan được tạo tài khoản. Mật khẩu không được đưa vào GitHub hay nhật ký.</p>
       <form onSubmit={e=>{e.preventDefault();action(async()=>{
         await requestApi('/admin/users',token,{method:'POST',body:JSON.stringify({
-          tenDangNhap:login,hoTen:name,matKhau:password,maPhongBan:department,maVaiTro:role})});
-        setPassword('');setLogin('');setName('');
+          tenDangNhap:login,hoTen:name,matKhau:password,maPhongBan:department,maVaiTro:role,tenChucVu:positionName})});
+        setPassword('');setLogin('');setName('');setPositionName('');
       },'Đã tạo tài khoản. Hãy hướng dẫn người dùng đổi mật khẩu sau lần đăng nhập đầu.');}}>
         <div className="form-grid admin-create-grid">
           <label>Tên đăng nhập<input value={login} onChange={e=>setLogin(e.target.value)} required placeholder="vd: phophong_a"/></label>
           <label>Họ và tên<input value={name} onChange={e=>setName(e.target.value)} required placeholder="Nhập họ tên người dùng"/></label>
           <label>Mật khẩu ban đầu (ít nhất 12 ký tự)<input type="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={12} required autoComplete="new-password"/></label>
-          <label>Phòng ban<select value={department} onChange={e=>setDepartment(Number(e.target.value))}>
+          <label>Phòng ban<select value={department} onChange={e=>{const id=Number(e.target.value);setDepartment(id);setRole(changeDepartment(id,role));}}>
             {departments.map(d=><option key={d.MaPhongBan} value={d.MaPhongBan}>{d.TenPhongBan}</option>)}
           </select></label>
-          <label>Vai trò<select value={role} onChange={e=>setRole(e.target.value)}>
-            {roles.map(r=><option key={r.MaDinhDanh} value={r.MaDinhDanh}>{r.TenVaiTro}</option>)}
+          <label>Chức vụ<select value={role} onChange={e=>setRole(e.target.value)}>
+            {validRoles(department).map(r=><option key={r.MaDinhDanh} value={r.MaDinhDanh}>{r.TenVaiTro}</option>)}
           </select></label>
+          <label>Tên gọi chức vụ tại cơ quan (tùy chọn)<input maxLength={150} value={positionName} onChange={e=>setPositionName(e.target.value)} placeholder="VD: Trưởng văn phòng, Phó viện trưởng"/></label>
         </div>
         <button className="primary" type="submit" disabled={busy||!department||!role||password.length<12}><Plus size={16}/> Tạo tài khoản</button>
       </form></section>
     <section className="panel admin-users-list"><div className="panel-head"><div><h3>Người dùng trong cơ quan</h3><p>{users.length} tài khoản</p></div>
       <button className="secondary small" disabled={busy} onClick={()=>load().catch(e=>setError((e as Error).message))}><RefreshCw size={15}/> Tải lại</button></div>
-      {users.map(u=>{const edit=edits[u.MaNguoiDung]??{department:u.MaPhongBan,role:u.MaVaiTro};
+      {users.map(u=>{const edit=edits[u.MaNguoiDung]??{department:u.MaPhongBan,role:u.MaVaiTro,positionName:u.ChucVu};
         const own=u.TenDangNhap===username;const protectedUser=u.MaVaiTro==='AGENCY_ADMIN'||own;
         return <div className="admin-user-row" key={u.MaNguoiDung}>
-          <div><strong>{u.HoTen}</strong><small>{u.TenDangNhap} · {u.TenPhongBan}</small>
+          <div><strong>{u.HoTen}</strong><small>{u.TenDangNhap} · {u.TenPhongBan}</small><small>{u.ChucVu||roleLabel(u.MaVaiTro)}</small>
             <span className={u.DangHoatDong?'success-note':'form-error'}>{u.DangHoatDong?'Đang hoạt động':'Đã khóa'}</span></div>
-          <label>Phòng ban<select disabled={busy||protectedUser} value={edit.department} onChange={e=>setEdits(s=>({...s,[u.MaNguoiDung]:{...edit,department:Number(e.target.value)}}))}>
+          <label>Phòng ban<select disabled={busy||protectedUser} value={edit.department} onChange={e=>{const id=Number(e.target.value);setEdits(s=>({...s,[u.MaNguoiDung]:{...edit,department:id,role:changeDepartment(id,edit.role)}}));}}>
             {departments.map(d=><option key={d.MaPhongBan} value={d.MaPhongBan}>{d.TenPhongBan}</option>)}
           </select></label>
-          <label>Vai trò<select disabled={busy||protectedUser} value={edit.role} onChange={e=>setEdits(s=>({...s,[u.MaNguoiDung]:{...edit,role:e.target.value}}))}>
+          <label>Chức vụ<select disabled={busy||protectedUser} value={edit.role} onChange={e=>setEdits(s=>({...s,[u.MaNguoiDung]:{...edit,role:e.target.value}}))}>
             {protectedUser&&<option value={u.MaVaiTro}>{u.MaVaiTro}</option>}
-            {roles.map(r=><option key={r.MaDinhDanh} value={r.MaDinhDanh}>{r.TenVaiTro}</option>)}
+            {!protectedUser&&!validRoles(edit.department).some(r=>r.MaDinhDanh===edit.role)&&<option value={edit.role}>{roleLabel(edit.role)} (cũ)</option>}
+            {validRoles(edit.department).map(r=><option key={r.MaDinhDanh} value={r.MaDinhDanh}>{r.TenVaiTro}</option>)}
           </select></label>
+          <label>Tên gọi chức vụ<input disabled={busy||protectedUser} maxLength={150} value={edit.positionName}
+            onChange={e=>setEdits(s=>({...s,[u.MaNguoiDung]:{...edit,positionName:e.target.value}}))} placeholder="VD: Trưởng văn phòng"/></label>
           <div className="admin-user-actions"><button className="secondary small" disabled={busy||protectedUser||!edit.department||!edit.role}
-            onClick={()=>action(()=>requestApi(`/admin/users/${u.MaNguoiDung}/assignment`,token,{method:'PUT',body:JSON.stringify({maPhongBan:edit.department,maVaiTro:edit.role})}),'Đã cập nhật phân công.')}>Lưu phân công</button>
+            onClick={()=>action(()=>requestApi(`/admin/users/${u.MaNguoiDung}/assignment`,token,{method:'PUT',body:JSON.stringify({maPhongBan:edit.department,maVaiTro:edit.role,tenChucVu:edit.positionName})}),'Đã cập nhật phân công.')}>Lưu phân công</button>
             <button className="secondary small" disabled={busy||protectedUser}
               onClick={()=>action(()=>requestApi(`/admin/users/${u.MaNguoiDung}/status`,token,{method:'PUT',body:JSON.stringify({dangHoatDong:!u.DangHoatDong})}),u.DangHoatDong?'Đã khóa tài khoản.':'Đã mở tài khoản.')}>{u.DangHoatDong?'Khóa':'Mở khóa'}</button></div>
         </div>;})}

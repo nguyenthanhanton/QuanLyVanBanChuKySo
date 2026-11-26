@@ -58,14 +58,16 @@ public static class QuyTrinhEndpoints
             if(department==null)return Results.NotFound();
             var leaderAuthorRoles=(await cn.QueryAsync<string>(@"
                 SELECT r.MaDinhDanh FROM dbo.NguoiDungVaiTro uv JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
+                JOIN dbo.NguoiDung n ON n.MaNguoiDung=uv.MaNguoiDung
+                JOIN dbo.PhongBan p ON p.MaPhongBan=n.MaPhongBan AND p.MaCoQuan=n.MaCoQuan
                 WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency
-                  AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO')",
+                  AND p.MaDinhDanh='LANH_DAO' AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO')",
                 new{user=actor.MaNguoiDung,agency=actor.MaCoQuan})).ToHashSet();
             var leaderAuthor=leaderAuthorRoles.Count>0;
             var leaderRequiredRole=leaderAuthorRoles.Contains("LANH_DAO")?"PHO_LANH_DAO":null;
-            var office=department is "VAN_THU" or "VAN_PHONG";
-            var role=office?"TRUONG_VAN_PHONG":"TRUONG_PHONG";
-            var deputyRole=office?"PHO_VAN_PHONG":"PHO_PHONG";
+            var reviewerDepartment=department=="VAN_THU"?"VAN_PHONG":department;
+            var role="TRUONG_PHONG";
+            var deputyRole="PHO_PHONG";
             var authorRoles=(await cn.QueryAsync<string>(@"
                 SELECT r.MaDinhDanh FROM dbo.NguoiDungVaiTro uv
                 JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
@@ -82,7 +84,7 @@ public static class QuyTrinhEndpoints
                 JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
                 LEFT JOIN dbo.PhongBan p ON p.MaPhongBan=u.MaPhongBan
                 WHERE u.MaCoQuan=@agency AND u.DangHoatDong=1 AND u.MaNguoiDung<>@user
-                  AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO')
+                  AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO') AND p.MaDinhDanh='LANH_DAO'
                   AND (@leaderRequiredRole IS NULL OR r.MaDinhDanh=@leaderRequiredRole)
                 ORDER BY u.HoTen",new{agency=actor.MaCoQuan,user=actor.MaNguoiDung,leaderRequiredRole});
             var reviewers=leaderAuthor?Enumerable.Empty<dynamic>():await cn.QueryAsync(@"
@@ -94,9 +96,9 @@ public static class QuyTrinhEndpoints
                 WHERE u.MaCoQuan=@agency AND u.DangHoatDong=1 AND u.MaNguoiDung<>@user
                   AND r.MaDinhDanh IN (@role,@deputyRole)
                   AND (@requiredRole IS NULL OR r.MaDinhDanh=@requiredRole)
-                  AND (@office=1 OR p.MaDinhDanh=@department)
+                  AND p.MaDinhDanh=@reviewerDepartment
                 ORDER BY u.HoTen",new{agency=actor.MaCoQuan,user=actor.MaNguoiDung,
-                    role,deputyRole,requiredRole,office,department});
+                    role,deputyRole,requiredRole,reviewerDepartment});
             return Results.Ok(new{nguoiKyNhay=reviewers,nguoiKyLanhDao=leaders,
                 vaiTroKyNhay=requiredRole??role,phongBanNguoiSoan=department,
                 boQuaKyNhay=leaderAuthor,soBuocKy=leaderAuthor?3:4});
@@ -163,14 +165,16 @@ public static class QuyTrinhEndpoints
             if(department==null){tx.Rollback();return Results.Conflict(new{message="Người soạn chưa được phân phòng ban."});}
             var leaderAuthorRoles=(await cn.QueryAsync<string>(@"
                 SELECT r.MaDinhDanh FROM dbo.NguoiDungVaiTro uv JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
+                JOIN dbo.NguoiDung n ON n.MaNguoiDung=uv.MaNguoiDung
+                JOIN dbo.PhongBan p ON p.MaPhongBan=n.MaPhongBan AND p.MaCoQuan=n.MaCoQuan
                 WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency
-                  AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO')",
+                  AND p.MaDinhDanh='LANH_DAO' AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO')",
                 new{user=actor.MaNguoiDung,agency=actor.MaCoQuan},tx)).ToHashSet();
             var leaderAuthor=leaderAuthorRoles.Count>0;
             var leaderRequiredRole=leaderAuthorRoles.Contains("LANH_DAO")?"PHO_LANH_DAO":null;
-            var office=department is "VAN_THU" or "VAN_PHONG";
-            var role=office?"TRUONG_VAN_PHONG":"TRUONG_PHONG";
-            var deputyRole=office?"PHO_VAN_PHONG":"PHO_PHONG";
+            var reviewerDepartment=department=="VAN_THU"?"VAN_PHONG":department;
+            var role="TRUONG_PHONG";
+            var deputyRole="PHO_PHONG";
             var authorRoles=(await cn.QueryAsync<string>(@"
                 SELECT r.MaDinhDanh FROM dbo.NguoiDungVaiTro uv
                 JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
@@ -181,8 +185,8 @@ public static class QuyTrinhEndpoints
             var authorized=await cn.ExecuteScalarAsync<int>(@"
                 SELECT COUNT(DISTINCT CASE WHEN @leaderAuthor=0 AND u.MaNguoiDung=@reviewer AND r.MaDinhDanh IN (@role,@deputyRole)
                     AND (@requiredRole IS NULL OR r.MaDinhDanh=@requiredRole)
-                    AND (@office=1 OR p.MaDinhDanh=@department) THEN 1
-                    WHEN u.MaNguoiDung=@leader AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO')
+                    AND p.MaDinhDanh=@reviewerDepartment THEN 1
+                    WHEN u.MaNguoiDung=@leader AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO') AND p.MaDinhDanh='LANH_DAO'
                     AND (@leaderRequiredRole IS NULL OR r.MaDinhDanh=@leaderRequiredRole) THEN 2 END)
                 FROM dbo.NguoiDung u JOIN dbo.NguoiDungVaiTro uv ON uv.MaNguoiDung=u.MaNguoiDung
                   AND uv.MaCoQuan=u.MaCoQuan JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
@@ -190,7 +194,7 @@ public static class QuyTrinhEndpoints
                 WHERE u.MaCoQuan=@agency AND u.DangHoatDong=1
                   AND u.MaNguoiDung<>@user AND u.MaNguoiDung IN (@reviewer,@leader)",
                 new{agency=actor.MaCoQuan,reviewer=body.MaNguoiKyNhay,leader=body.MaNguoiKyLanhDao,
-                    user=actor.MaNguoiDung,role,deputyRole,requiredRole,office,department,
+                    user=actor.MaNguoiDung,role,deputyRole,requiredRole,reviewerDepartment,
                     leaderAuthor,leaderRequiredRole},tx);
             if((!leaderAuthor && body.MaNguoiKyNhay==body.MaNguoiKyLanhDao) ||
                (leaderAuthor && body.MaNguoiKyNhay!=0) || authorized!=(leaderAuthor?1:2)){
