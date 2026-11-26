@@ -3,6 +3,7 @@ import {Archive,ChevronLeft,ChevronRight,FileText,FolderPlus,RefreshCw,Search} f
 import type {VanBan} from './types';
 import {formatDate} from './types';
 import NopLuuPanel from './NopLuuPanel';
+import LuuTruNangCaoPanel from './LuuTruNangCaoPanel';
 
 type Department={MaPhongBan:number;TenPhongBan:string};
 type Dossier={MaHoSo:string;MaHoSoNoiBo:string;TenHoSo:string;LoaiHoSo:string;NamHoSo:number;
@@ -172,6 +173,7 @@ export default function HoSoPage({token,documents,onOpen}:{token:string;document
       </div></div>}
     <NopLuuPanel token={token} selected={selected} closed={details?.HoSo.DaDong} documents={documents} onOpen={onOpen}
       onChanged={async()=>{await load();if(selected)await loadDetails(selected);}}/>
+    <LuuTruNangCaoPanel token={token}/>
     <p className="fine-note">Hồ sơ chỉ lưu liên kết; không sao chép, sửa hay xóa PDF đã ký. Quyền truy cập văn bản tiếp tục được kiểm tra ở máy chủ.</p>
   </div>;
 }
