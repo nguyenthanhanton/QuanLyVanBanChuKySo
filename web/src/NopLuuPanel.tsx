@@ -32,12 +32,23 @@ export default function NopLuuPanel({token,selected,closed,documents,onOpen,onCh
   const [expanded,setExpanded]=useState<number|null>(null);
   const [files,setFiles]=useState<SubDocument[]>([]);
   const [receipt,setReceipt]=useState<Receipt|null>(null);
+  const [incomingPdf,setIncomingPdf]=useState('');
   const [reason,setReason]=useState('');
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
   const [page,setPage]=useState(1);
   const [filter,setFilter]=useState('ALL');
+  useEffect(()=>()=>{if(incomingPdf)URL.revokeObjectURL(incomingPdf);},[incomingPdf]);
+  const openIncoming=async(dossierId:string,docId:string)=>{
+    try{
+      const response=await fetch(`/api/v1/dossiers/${dossierId}/incoming-documents/${docId}/pdf`,{
+        headers:{Authorization:`Bearer ${token}`}});
+      if(!response.ok){const data=await response.json().catch(()=>({}));
+        throw new Error(data.message??`Không thể xem PDF (${response.status}).`);}
+      setIncomingPdf(URL.createObjectURL(await response.blob()));
+    }catch(e){setError((e as Error).message);}
+  };
   const reload=async()=>{
     const [submissions,permission]=await Promise.all([
       api('/submissions',token),api('/submissions/permissions',token)]);
@@ -95,7 +106,9 @@ export default function NopLuuPanel({token,selected,closed,documents,onOpen,onCh
             <FileCheck2 size={14}/> Biên nhận</button>}</div>
         {expanded===row.MaLuot&&<div className="archive-submission-docs">{files.length===0&&<p className="fine-note">Không có văn bản được phép xem.</p>}
           {files.map(f=><div key={f.MaVanBan}><span>{f.MaNoiBo} · {f.TieuDe}</span>
-            <button className="secondary small" onClick={()=>{const doc=documents.find(d=>d.id===f.MaVanBan);
+            <button className="secondary small" onClick={()=>{if(f.MaNoiBo.startsWith('Số đến')){
+                void openIncoming(row.MaHoSo,f.MaVanBan);return;}
+              const doc=documents.find(d=>d.id===f.MaVanBan);
               if(doc)onOpen(doc);else setError('Văn bản không nằm trong danh sách được phép xem.');}}>Xem</button></div>)}</div>}
         {clerk&&row.TrangThai==='CHO_TIEP_NHAN'&&<div className="archive-decision">
           <textarea placeholder="Ghi lý do nếu trả lại hồ sơ (bắt buộc)" value={reason} maxLength={1000} rows={2} onChange={e=>setReason(e.target.value)}/>
@@ -117,5 +130,11 @@ export default function NopLuuPanel({token,selected,closed,documents,onOpen,onCh
         <p className="fine-note">Biên nhận điện tử ghi nhận trên hệ thống, không phải chữ ký số CA.</p></div>
       <div className="archive-actions archive-receipt-actions"><button className="secondary" onClick={()=>setReceipt(null)}>Đóng</button>
         <button className="primary" onClick={()=>window.print()}>In / Lưu PDF</button></div></div></div>}
+    {incomingPdf&&<div className="incoming-work-preview-overlay" role="dialog" aria-modal="true" aria-label="Văn bản đến nộp lưu">
+      <div className="incoming-work-preview"><div className="incoming-work-preview-head"><strong>PDF văn bản đến đã ký</strong>
+        <button className="secondary small" onClick={()=>setIncomingPdf('')}>Đóng</button></div>
+        <iframe src={incomingPdf} title="PDF văn bản đến nộp lưu"/>
+      </div>
+    </div>}
   </div>;
 }
