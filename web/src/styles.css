@@ -166,3 +166,8 @@
 .notification-popup button small{display:block;margin-top:5px;color:#71849e}
 .notification-popup p{padding:10px;color:#7487a0}
 @media(max-width:700px){.notification-popup{right:12px;top:62px}}
+.pagination-controls{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:10px;padding:13px 16px;border-top:1px solid #e4ebf4;color:#647991;font-size:12px}
+.pagination-controls button{min-width:64px}
+.notification-popup .pagination-controls{padding:10px 2px;gap:5px;justify-content:center}
+.notification-popup .pagination-controls button{display:inline-flex;width:auto;padding:6px 9px;background:#f7fbff;border:1px solid #d9e5f3;border-radius:7px}
+@media(max-width:600px){.pagination-controls{justify-content:center;gap:7px}}
