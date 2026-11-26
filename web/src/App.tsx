@@ -73,7 +73,8 @@ function Status({ status, small=false }: { status: TrangThai | ChuyenPhat['statu
 }
 
 function isAllowed(user: Actor | null, permission: string) {
-  if(permission==='incoming.manage' && user?.capabilities.includes('workflow.decide'))return true;
+  if(permission==='incoming.manage' && (user?.capabilities.includes('workflow.decide') ||
+      user?.capabilities.includes('workflow.queue')))return true;
   return user?.capabilities.includes(permission) ?? false;
 }
 
