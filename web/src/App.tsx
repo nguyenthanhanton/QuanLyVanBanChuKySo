@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity, Archive, ArrowLeft, ArrowRight, ArrowUpRight, Bell, Building2,
@@ -604,6 +604,16 @@ function UserAdministration({token,username}:{token:string;username:string}){
     const available=validRoles(id);return available.some(r=>r.MaDinhDanh===currentRole)?currentRole:available[0]?.MaDinhDanh??'';
   };
   const roleLabel=(r:string)=>roles.find(item=>item.MaDinhDanh===r)?.TenVaiTro??r;
+  const departmentRank=(id:number)=>{
+    const code=departments.find(d=>d.MaPhongBan===id)?.MaDinhDanh;
+    return code==='LANH_DAO'?0:code==='VAN_PHONG'?1:code==='VAN_THU'?3:2;
+  };
+  const positionRank=(roleCode:string)=>({LANH_DAO:0,TRUONG_PHONG:0,TRUONG_VAN_PHONG:0,
+    PHO_LANH_DAO:1,PHO_PHONG:1,PHO_VAN_PHONG:1,CHUYEN_VIEN:2,VAN_THU:2,
+    AGENCY_ADMIN:3} as Record<string,number>)[roleCode]??4;
+  const orderedUsers=[...users].sort((a,b)=>departmentRank(a.MaPhongBan)-departmentRank(b.MaPhongBan)||
+    (a.TenPhongBan||'').localeCompare(b.TenPhongBan||'','vi')||
+    positionRank(a.MaVaiTro)-positionRank(b.MaVaiTro)||a.HoTen.localeCompare(b.HoTen,'vi'));
   return <div className="user-admin">
     <section className="panel admin-create"><h3>Thêm tài khoản vào cơ quan</h3>
       <p className="subtle">Chỉ quản trị viên cơ quan được tạo tài khoản. Mật khẩu không được đưa vào GitHub hay nhật ký.</p>
@@ -628,9 +638,13 @@ function UserAdministration({token,username}:{token:string;username:string}){
       </form></section>
     <section className="panel admin-users-list"><div className="panel-head"><div><h3>Người dùng trong cơ quan</h3><p>{users.length} tài khoản</p></div>
       <button className="secondary small" disabled={busy} onClick={()=>load().catch(e=>setError((e as Error).message))}><RefreshCw size={15}/> Tải lại</button></div>
-      {users.map(u=>{const edit=edits[u.MaNguoiDung]??{department:u.MaPhongBan,role:u.MaVaiTro,positionName:u.ChucVu};
+      {orderedUsers.map((u,index)=>{const edit=edits[u.MaNguoiDung]??{department:u.MaPhongBan,role:u.MaVaiTro,positionName:u.ChucVu};
         const own=u.TenDangNhap===username;const protectedUser=u.MaVaiTro==='AGENCY_ADMIN'||own;
-        return <div className="admin-user-row" key={u.MaNguoiDung}>
+        const groupStart=index===0||orderedUsers[index-1].MaPhongBan!==u.MaPhongBan;
+        const count=groupStart?orderedUsers.filter(item=>item.MaPhongBan===u.MaPhongBan).length:0;
+        return <Fragment key={u.MaNguoiDung}>
+        {groupStart&&<div className="admin-department-header"><strong>{u.TenPhongBan||'Chưa phân phòng ban'}</strong><span>{count} tài khoản</span></div>}
+        <div className="admin-user-row">
           <div><strong>{u.HoTen}</strong><small>{u.TenDangNhap} · {u.TenPhongBan}</small><small>{u.ChucVu||roleLabel(u.MaVaiTro)}</small>
             <span className={u.DangHoatDong?'success-note':'form-error'}>{u.DangHoatDong?'Đang hoạt động':'Đã khóa'}</span></div>
           <label>Phòng ban<select disabled={busy||protectedUser} value={edit.department} onChange={e=>{const id=Number(e.target.value);setEdits(s=>({...s,[u.MaNguoiDung]:{...edit,department:id,role:changeDepartment(id,edit.role)}}));}}>
@@ -647,7 +661,7 @@ function UserAdministration({token,username}:{token:string;username:string}){
             onClick={()=>action(()=>requestApi(`/admin/users/${u.MaNguoiDung}/assignment`,token,{method:'PUT',body:JSON.stringify({maPhongBan:edit.department,maVaiTro:edit.role,tenChucVu:edit.positionName})}),'Đã cập nhật phân công.')}>Lưu phân công</button>
             <button className="secondary small" disabled={busy||protectedUser}
               onClick={()=>action(()=>requestApi(`/admin/users/${u.MaNguoiDung}/status`,token,{method:'PUT',body:JSON.stringify({dangHoatDong:!u.DangHoatDong})}),u.DangHoatDong?'Đã khóa tài khoản.':'Đã mở tài khoản.')}>{u.DangHoatDong?'Khóa':'Mở khóa'}</button></div>
-        </div>;})}
+        </div></Fragment>;})}
     </section>
     {error&&<div className="form-error">{error}</div>}{message&&<p className="success-note">{message}</p>}
   </div>;
