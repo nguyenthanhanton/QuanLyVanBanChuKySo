@@ -66,7 +66,13 @@ public static class QuyTrinhEndpoints
                 new{user=actor.MaNguoiDung,agency=actor.MaCoQuan})).ToHashSet();
             var leaderAuthor=leaderAuthorRoles.Count>0;
             var leaderRequiredRole=leaderAuthorRoles.Contains("LANH_DAO")?"PHO_LANH_DAO":null;
-            var reviewerDepartment=department=="VAN_THU"?"VAN_PHONG":department;
+            // Văn thư thuộc Ban lãnh đạo được chọn Trưởng phòng bất kỳ của cơ quan.
+            var clerkAuthor=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.NguoiDungVaiTro uv
+                JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
+                WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency AND r.MaDinhDanh='VAN_THU'",
+                new{user=actor.MaNguoiDung,agency=actor.MaCoQuan})>0;
+            var reviewerDepartment=department;
             var role="TRUONG_PHONG";
             var deputyRole="PHO_PHONG";
             var authorRoles=(await cn.QueryAsync<string>(@"
@@ -95,11 +101,12 @@ public static class QuyTrinhEndpoints
                   AND uv.MaCoQuan=u.MaCoQuan JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
                 LEFT JOIN dbo.PhongBan p ON p.MaPhongBan=u.MaPhongBan
                 WHERE u.MaCoQuan=@agency AND u.DangHoatDong=1 AND u.MaNguoiDung<>@user
-                  AND r.MaDinhDanh IN (@role,@deputyRole)
-                  AND (@requiredRole IS NULL OR r.MaDinhDanh=@requiredRole)
-                  AND p.MaDinhDanh=@reviewerDepartment
+                  AND ((@clerkAuthor=1 AND r.MaDinhDanh=@role AND p.MaDinhDanh<>'LANH_DAO')
+                    OR (@clerkAuthor=0 AND r.MaDinhDanh IN (@role,@deputyRole)
+                      AND (@requiredRole IS NULL OR r.MaDinhDanh=@requiredRole)
+                      AND p.MaDinhDanh=@reviewerDepartment))
                 ORDER BY u.HoTen",new{agency=actor.MaCoQuan,user=actor.MaNguoiDung,
-                    role,deputyRole,requiredRole,reviewerDepartment});
+                    role,deputyRole,requiredRole,reviewerDepartment,clerkAuthor});
             return Results.Ok(new{nguoiKyNhay=reviewers,nguoiKyLanhDao=leaders,
                 vaiTroKyNhay=requiredRole??role,phongBanNguoiSoan=department,
                 boQuaKyNhay=leaderAuthor,soBuocKy=leaderAuthor?3:4});
@@ -184,7 +191,12 @@ public static class QuyTrinhEndpoints
                 new{user=actor.MaNguoiDung,agency=actor.MaCoQuan},tx)).ToHashSet();
             var leaderAuthor=leaderAuthorRoles.Count>0;
             var leaderRequiredRole=leaderAuthorRoles.Contains("LANH_DAO")?"PHO_LANH_DAO":null;
-            var reviewerDepartment=department=="VAN_THU"?"VAN_PHONG":department;
+            var clerkAuthor=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.NguoiDungVaiTro uv
+                JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
+                WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency AND r.MaDinhDanh='VAN_THU'",
+                new{user=actor.MaNguoiDung,agency=actor.MaCoQuan},tx)>0;
+            var reviewerDepartment=department;
             var role="TRUONG_PHONG";
             var deputyRole="PHO_PHONG";
             var authorRoles=(await cn.QueryAsync<string>(@"
@@ -195,9 +207,11 @@ public static class QuyTrinhEndpoints
                 new{user=actor.MaNguoiDung,agency=actor.MaCoQuan,role,deputyRole},tx)).ToHashSet();
             var requiredRole=authorRoles.Contains(role)?deputyRole:null;
             var authorized=await cn.ExecuteScalarAsync<int>(@"
-                SELECT COUNT(DISTINCT CASE WHEN @leaderAuthor=0 AND u.MaNguoiDung=@reviewer AND r.MaDinhDanh IN (@role,@deputyRole)
-                    AND (@requiredRole IS NULL OR r.MaDinhDanh=@requiredRole)
-                    AND p.MaDinhDanh=@reviewerDepartment THEN 1
+                SELECT COUNT(DISTINCT CASE WHEN @leaderAuthor=0 AND u.MaNguoiDung=@reviewer
+                    AND ((@clerkAuthor=1 AND r.MaDinhDanh=@role AND p.MaDinhDanh<>'LANH_DAO')
+                      OR (@clerkAuthor=0 AND r.MaDinhDanh IN (@role,@deputyRole)
+                        AND (@requiredRole IS NULL OR r.MaDinhDanh=@requiredRole)
+                        AND p.MaDinhDanh=@reviewerDepartment)) THEN 1
                     WHEN u.MaNguoiDung=@leader AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO') AND p.MaDinhDanh='LANH_DAO'
                     AND (@leaderRequiredRole IS NULL OR r.MaDinhDanh=@leaderRequiredRole) THEN 2 END)
                 FROM dbo.NguoiDung u JOIN dbo.NguoiDungVaiTro uv ON uv.MaNguoiDung=u.MaNguoiDung
@@ -207,7 +221,7 @@ public static class QuyTrinhEndpoints
                   AND u.MaNguoiDung<>@user AND u.MaNguoiDung IN (@reviewer,@leader)",
                 new{agency=actor.MaCoQuan,reviewer=body.MaNguoiKyNhay,leader=body.MaNguoiKyLanhDao,
                     user=actor.MaNguoiDung,role,deputyRole,requiredRole,reviewerDepartment,
-                    leaderAuthor,leaderRequiredRole},tx);
+                    leaderAuthor,leaderRequiredRole,clerkAuthor},tx);
             if((!leaderAuthor && body.MaNguoiKyNhay==body.MaNguoiKyLanhDao) ||
                (leaderAuthor && body.MaNguoiKyNhay!=0) || authorized!=(leaderAuthor?1:2)){
                 tx.Rollback();return Results.BadRequest(new{message="Người ký được chọn không đúng vai trò hoặc phòng ban."});
