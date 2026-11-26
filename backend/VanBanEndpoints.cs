@@ -15,6 +15,12 @@ public static class VanBanEndpoints
         v.MaNguoiTao=@user
         OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t
                   WHERE t.MaVanBan=v.MaVanBan AND t.MaNguoiDuocGiao=@user)
+        OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t
+                  JOIN dbo.UyQuyenKyTacVu q ON q.MaTacVu=t.MaTacVu
+                  WHERE t.MaVanBan=v.MaVanBan AND t.MaCoQuan=@agency
+                    AND t.TrangThai='CHO_XU_LY' AND q.MaCoQuan=@agency
+                    AND q.MaNguoiDuocUyQuyen=@user AND q.DaThuHoi=0
+                    AND q.HieuLucTu<=SYSUTCDATETIME() AND q.HieuLucDen>SYSUTCDATETIME())
         OR (v.DoMat='THUONG' AND EXISTS(
               SELECT 1 FROM dbo.NguoiDungVaiTro uv
               JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
