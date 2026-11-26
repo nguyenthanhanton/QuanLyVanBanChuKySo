@@ -13,6 +13,7 @@ public sealed class ChuyenPhatNhan {
     public string TieuDe {get;set;}="";
     public int MaCoQuanGui {get;set;}
     public int MaCoQuanNhan {get;set;}
+    public int SoPhienBan {get;set;}
 }
 
 public static class PhatHanhEndpoints
@@ -115,9 +116,9 @@ public static class PhatHanhEndpoints
                     VALUES(@delivery,@publication,@agency,@recipient,@user,'CHO_GUI')",
                     new{delivery,publication,agency=actor.MaCoQuan,recipient,user=actor.MaNguoiDung},tx);
                 await cn.ExecuteAsync(@"
-                    INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,MaLuotChuyen,HanhDong,MoTa,PhamViHienThi)
-                    VALUES(@id,@agency,@user,@delivery,'TAO_LUOT_CHUYEN',@message,'GIAO_NHAN')",
-                    new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,delivery,
+                    INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,MaLuotChuyen,HanhDong,MoTa,PhamViHienThi,SoPhienBan)
+                    VALUES(@id,@agency,@user,@delivery,'TAO_LUOT_CHUYEN',@message,'GIAO_NHAN',@version)",
+                    new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,delivery,version=doc.PhienBanHienTai,
                         message=$"Đã tạo lượt chuyển tới cơ quan mã {recipient}; chờ gửi"},tx);
             }
             await cn.ExecuteAsync(@"
@@ -145,7 +146,7 @@ public static class PhatHanhEndpoints
             var old=await KySoEndpoints.LayBienNhan(cn,tx,actor.MaCoQuan.Value,request.MaYeuCau,"GUI_VAN_BAN");
             if(old!=null){tx.Commit();return Results.Content(old,"application/json");}
             var delivery=await cn.QuerySingleOrDefaultAsync<ChuyenPhatNhan>(@"
-                SELECT v.MaVanBan,l.MaPhatHanh,l.TrangThai,v.TieuDe,l.MaCoQuanGui,l.MaCoQuanNhan
+                SELECT v.MaVanBan,l.MaPhatHanh,l.TrangThai,v.TieuDe,l.MaCoQuanGui,l.MaCoQuanNhan,p.SoPhienBan
                 FROM dbo.LuotChuyenVanBan l WITH(UPDLOCK,HOLDLOCK)
                 JOIN dbo.BanPhatHanh p ON p.MaPhatHanh=l.MaPhatHanh
                 JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
@@ -162,9 +163,9 @@ public static class PhatHanhEndpoints
                 UPDATE dbo.LuotChuyenVanBan SET TrangThai='DA_GUI',ThoiDiemGui=SYSUTCDATETIME(),
                     SoLanGui=SoLanGui+1 WHERE MaLuotChuyen=@id",new{id},tx);
             await cn.ExecuteAsync(@"
-                INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,MaLuotChuyen,HanhDong,MoTa,PhamViHienThi)
-                VALUES(@doc,@agency,@user,@id,'GUI_VAN_BAN',@message,'GIAO_NHAN')",
-                new{doc=delivery.MaVanBan,agency=actor.MaCoQuan,user=actor.MaNguoiDung,id,
+                INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,MaLuotChuyen,HanhDong,MoTa,PhamViHienThi,SoPhienBan)
+                VALUES(@doc,@agency,@user,@id,'GUI_VAN_BAN',@message,'GIAO_NHAN',@version)",
+                new{doc=delivery.MaVanBan,agency=actor.MaCoQuan,user=actor.MaNguoiDung,id,version=delivery.SoPhienBan,
                     message=$"Đã gửi bản phát hành tới cơ quan mã {delivery.MaCoQuanNhan}"},tx);
             var json=JsonSerializer.Serialize(new{maLuotChuyen=id,trangThai="DA_GUI"});
             await KySoEndpoints.GhiBienNhan(cn,tx,actor,request.MaYeuCau,"GUI_VAN_BAN",json);

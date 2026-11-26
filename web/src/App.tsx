@@ -130,7 +130,9 @@ async function requestApi(path:string, token:string, init?:RequestInit) {
     const fallback:Record<number,string>={
       400:'Yêu cầu không hợp lệ.',401:'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.',
       403:'Bạn không có quyền truy cập chức năng này.',404:'Không tìm thấy văn bản hoặc tài nguyên được yêu cầu.',
-      409:'Dữ liệu đã thay đổi hoặc có xung đột.',500:'Máy chủ gặp lỗi xử lý yêu cầu.'};
+      409:'Dữ liệu đã thay đổi hoặc có xung đột.',500:'Máy chủ gặp lỗi xử lý yêu cầu.',
+      502:'Không thể kết nối máy chủ API. Hãy kiểm tra backend và kết nối mạng.',
+      503:'Máy chủ API hiện không sẵn sàng.'};
     throw new Error(typeof problem.message==='string'&&problem.message.trim()?problem.message:
       fallback[res.status]??`Máy chủ trả lỗi ${res.status}.`);
   }
@@ -1344,7 +1346,8 @@ export default function App() {
     const inbound=(incoming as Record<string,unknown>[]).map(d=>({
       id:String(field(d,'MaVanBanDen')),code:`DEN-${field(d,'SoDen')??'CHO_DANG_KY'}`,
       title:String(field(d,'TieuDe')),excerpt:'Bản phát hành đã tiếp nhận',type:'DEN' as const,
-      status:'DANG_CHUYEN' as const,urgency:'THUONG' as const,secrecy:'THUONG' as const,
+      status:(field(d,'TrangThai')==='HOAN_THANH'?'HOAN_THANH':'DANG_CHUYEN') as TrangThai,
+      urgency:'THUONG' as const,secrecy:'THUONG' as const,
       agency:'Cơ quan của tôi',department:'Văn thư',creator:String(field(d,'CoQuanGui')??'Bên ngoài'),
       assignee:'Văn thư',createdAt:String(field(d,'ThoiDiemTiepNhan')),version:1,to:[],events:[],transfers:[]
     }));

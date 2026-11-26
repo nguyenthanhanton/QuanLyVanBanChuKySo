@@ -9,8 +9,9 @@ type Stat={NamHoSo:number;PhongBan:string;Tong:number;VinhVien:number;HetHan:num
 type Request={MaDeXuat?:number;MaYeuCau?:number;MaHoSo:string;MaHoSoNoiBo:string;TenHoSo:string;
   SoNamDeXuat:number|null;LyDo:string;TrangThai:string;NguoiDeXuat?:string;NguoiYeuCau?:string;
   HieuLucDen?:string;GhiChuDuyet?:string};
-type Audit={MaNhatKy:number;MaHoSoNoiBo:string;NguoiThucHien:string;HanhDong:string;ThoiDiem:string};
-type Doc={MaVanBan:string;MaNoiBo:string;TieuDe:string};
+type Audit={MaNhatKy:number;MaHoSoNoiBo:string;NguoiThucHien:string;HanhDong:string;
+  ThoiDiem:string;MaVanBan:string|null;MaVanBanDen:string|null};
+type Doc={MaVanBan:string;MaNoiBo:string;TieuDe:string;Nguon:'DI'|'DEN'};
 type Attachment={MaTep:string;TenTep:string;LoaiNoiDung:string;KichThuoc:number};
 type Integrity={Tong:number;HopLe:number;CanKiemTra:number;ThieuPdfDaKy:number;
   KetQua:{MaBan:string;CoTep:boolean;MaBamDung:boolean;ChuKyToanVen:boolean|null}[];GhiChu:string};
@@ -58,12 +59,12 @@ export default function LuuTruNangCaoPanel({token}:{token:string}){
     catch(e){setError((e as Error).message);}finally{setBusy(false);}};
   const getDocs=async(id:number)=>{setError('');setSelectedAccess(id);setDocs([]);setAttachments({});
     try{setDocs(await api(`/access/${id}/documents`,token) as Doc[]);}catch(e){setError((e as Error).message);}};
-  const getAttachments=async(req:number,doc:string)=>{setError('');try{
-    const items=await api(`/access/${req}/attachments/${doc}`,token) as Attachment[];
-    setAttachments(previous=>({...previous,[doc]:items}));
+  const getAttachments=async(req:number,doc:Doc)=>{setError('');try{
+    const items=await api(`/access/${req}/attachments/${doc.MaVanBan}?nguon=${doc.Nguon}`,token) as Attachment[];
+    setAttachments(previous=>({...previous,[doc.MaVanBan]:items}));
   }catch(e){setError((e as Error).message);}};
-  const downloadAttachment=async(req:number,doc:string,file:Attachment)=>{setError('');try{
-    const res=await fetch(`/api/v1/archive/access/${req}/attachments/${doc}/${file.MaTep}`,
+  const downloadAttachment=async(req:number,doc:Doc,file:Attachment)=>{setError('');try{
+    const res=await fetch(`/api/v1/archive/access/${req}/attachments/${doc.MaVanBan}/${file.MaTep}?nguon=${doc.Nguon}`,
       {headers:{Authorization:`Bearer ${token}`}});
     if(!res.ok)throw new Error('Quyền đã hết hạn hoặc tệp đính kèm không còn toàn vẹn.');
     const url=URL.createObjectURL(await res.blob());const anchor=document.createElement('a');
@@ -78,8 +79,8 @@ export default function LuuTruNangCaoPanel({token}:{token:string}){
     const anchor=document.createElement('a');anchor.href=url;anchor.download=name;anchor.click();
     setTimeout(()=>URL.revokeObjectURL(url),30000);
   };
-  const openPdf=async(req:number,doc:string)=>{setError('');try{
-    const res=await fetch(`/api/v1/archive/access/${req}/files/${doc}`,{headers:{Authorization:`Bearer ${token}`}});
+  const openPdf=async(req:number,doc:Doc)=>{setError('');try{
+    const res=await fetch(`/api/v1/archive/access/${req}/files/${doc.MaVanBan}?nguon=${doc.Nguon}`,{headers:{Authorization:`Bearer ${token}`}});
     if(!res.ok)throw new Error('Không tải được PDF. Quyền có thể đã hết hạn hoặc tệp không toàn vẹn.');
     setPdf(URL.createObjectURL(await res.blob()));
   }catch(e){setError((e as Error).message);}};
@@ -153,16 +154,20 @@ export default function LuuTruNangCaoPanel({token}:{token:string}){
           {clerk&&r.TrangThai==='DA_DUYET'&&<button className="secondary" disabled={busy} onClick={()=>void action(`/access/${r.MaYeuCau}/revoke`)}>Thu hồi</button>}
           {r.TrangThai==='DA_DUYET'&&<button className="secondary small" onClick={()=>void getDocs(r.MaYeuCau!)}><FileSearch size={15}/> Xem tài liệu được cấp</button>}</div>
         {selectedAccess===r.MaYeuCau&&<div className="archive-submission-docs">{docs.length===0&&<p className="fine-note">Không có tài liệu được phép xem hoặc quyền chưa có hiệu lực.</p>}
-          {docs.map(d=><div key={d.MaVanBan} className="archive-grant-file"><span>{d.MaNoiBo} — {d.TieuDe}</span>
-            <div className="archive-actions"><button className="secondary small" onClick={()=>void openPdf(r.MaYeuCau!,d.MaVanBan)}>Xem PDF đã ký</button>
-              <button className="secondary small" onClick={()=>void getAttachments(r.MaYeuCau!,d.MaVanBan)}>Tệp đính kèm</button></div>
+          {docs.map(d=><div key={`${d.Nguon}-${d.MaVanBan}`} className="archive-grant-file"><span>{d.Nguon==='DEN'?'Văn bản đến':'Văn bản đi'} · {d.MaNoiBo} — {d.TieuDe}</span>
+            <div className="archive-actions"><button className="secondary small" onClick={()=>void openPdf(r.MaYeuCau!,d)}>Xem PDF đã ký</button>
+              <button className="secondary small" onClick={()=>void getAttachments(r.MaYeuCau!,d)}>Tệp đính kèm</button></div>
             {attachments[d.MaVanBan]&&<div className="archive-grant-attachments">{attachments[d.MaVanBan].length===0&&<small>Không có tệp đính kèm.</small>}
-              {attachments[d.MaVanBan].map(f=><button className="secondary small" key={f.MaTep} onClick={()=>void downloadAttachment(r.MaYeuCau!,d.MaVanBan,f)}>Tải {f.TenTep}</button>)}</div>}</div>)}</div>}</div>)}
+              {attachments[d.MaVanBan].map(f=><button className="secondary small" key={f.MaTep} onClick={()=>void downloadAttachment(r.MaYeuCau!,d,f)}>Tải {f.TenTep}</button>)}</div>}</div>)}</div>}</div>)}
     </>}
     {tab==='audit'&&<><div className="archive-export-row"><button className="secondary small" onClick={()=>csv('nhat-ky-khai-thac-ho-so.csv',
-      ['Mã hồ sơ','Hành động','Người thực hiện','Thời gian'],audit.map(a=>[a.MaHoSoNoiBo,a.HanhDong,a.NguoiThucHien,a.ThoiDiem]))}>Xuất nhật ký CSV</button></div>
+      ['Mã hồ sơ','Hành động','Người thực hiện','Thời gian','Nguồn','Mã văn bản'],audit.map(a=>[
+        a.MaHoSoNoiBo,a.HanhDong,a.NguoiThucHien,a.ThoiDiem,a.MaVanBanDen?'Đến':a.MaVanBan?'Đi':'Hồ sơ',a.MaVanBanDen??a.MaVanBan
+      ]))}>Xuất nhật ký CSV</button></div>
       {audit.slice((current-1)*15,current*15).map(a=><div className="archive-advanced-item" key={a.MaNhatKy}>
-      <strong>{a.HanhDong.replaceAll('_',' ')}</strong><small>{a.MaHoSoNoiBo} · {a.NguoiThucHien} · {formatDate(a.ThoiDiem)}</small></div>)}
+      <strong>{a.HanhDong.replaceAll('_',' ')}</strong><small>{a.MaHoSoNoiBo} · {a.NguoiThucHien} · {formatDate(a.ThoiDiem)}</small>
+      {a.MaVanBanDen&&<small>Văn bản đến: {a.MaVanBanDen}</small>}
+      {a.MaVanBan&&<small>Văn bản đi: {a.MaVanBan}</small>}</div>)}
       {audit.length===0&&<p className="archive-empty">Chưa có lượt truy cập được ghi nhận.</p>}</>}
     {collection.length>15&&<div className="archive-pagination"><button className="secondary small" disabled={current===1} onClick={()=>setPage(current-1)}>Trước</button>
       Trang {current}/{total} <button className="secondary small" disabled={current===total} onClick={()=>setPage(current+1)}>Sau</button></div>}

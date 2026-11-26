@@ -15,6 +15,7 @@ public sealed class VanBanNhan {
     public Guid MaVanBan { get; set; }
     public string TieuDe { get; set; } = "";
     public string TrangThai { get; set; } = "";
+    public int SoPhienBan { get; set; }
 }
 
 public static class QuyTrinhEndpoints
@@ -413,10 +414,10 @@ public static class QuyTrinhEndpoints
                 WHERE MaVanBan=@id AND MaCoQuan=@agency",
                 new{number,symbol=body.KyHieu.Trim(),date=ngayVN,id=body.MaVanBan,agency=actor.MaCoQuan},tx);
             await cn.ExecuteAsync(@"
-                INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,HanhDong,MoTa,TrangThaiSau)
-                VALUES(@id,@agency,@user,'CAP_SO',@message,'DA_CAP_SO')",
+                INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,HanhDong,MoTa,TrangThaiSau,SoPhienBan)
+                VALUES(@id,@agency,@user,'CAP_SO',@message,'DA_CAP_SO',@version)",
                 new{id=body.MaVanBan,agency=actor.MaCoQuan,user=actor.MaNguoiDung,
-                    message=$"Cấp số {number}/{body.KyHieu.Trim()} năm {nam}"},tx);
+                    version=currentVersion,message=$"Cấp số {number}/{body.KyHieu.Trim()} năm {nam}"},tx);
             var json=System.Text.Json.JsonSerializer.Serialize(new{maVanBan=body.MaVanBan,so=number,kyHieu=body.KyHieu,ngayBanHanh=ngayVN});
             await GhiBienNhan(cn,tx,actor.MaCoQuan.Value,actor.MaNguoiDung,body.MaYeuCau,"CAP_SO",json);
             tx.Commit();return Results.Content(json,"application/json");
@@ -462,7 +463,7 @@ public static class QuyTrinhEndpoints
             if(actor!.MaCoQuan is null)return Results.Forbid();
             using var cn=db.Open();await cn.OpenAsync();using var tx=cn.BeginTransaction();
             var row=await cn.QuerySingleOrDefaultAsync<VanBanNhan>(@"
-                SELECT v.MaVanBan,v.TieuDe,l.TrangThai
+                SELECT v.MaVanBan,v.TieuDe,l.TrangThai,p.SoPhienBan
                 FROM dbo.LuotChuyenVanBan l WITH(UPDLOCK)
                 JOIN dbo.BanPhatHanh p ON p.MaPhatHanh=l.MaPhatHanh
                 JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
@@ -485,9 +486,9 @@ public static class QuyTrinhEndpoints
                 new{agency=actor.MaCoQuan,id,user=actor.MaNguoiDung,title=row.TieuDe},tx);
             // Lich su giao nhan chung co the xem o ben gui; khong tra MaVanBanDen.
             await cn.ExecuteAsync(@"
-                INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,MaLuotChuyen,HanhDong,MoTa,PhamViHienThi)
-                VALUES(@doc,@agency,@user,@id,'TIEP_NHAN',N'Cơ quan nhận đã tiếp nhận văn bản','GIAO_NHAN')",
-                new{doc=row.MaVanBan,agency=actor.MaCoQuan,user=actor.MaNguoiDung,id},tx);
+                INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,MaLuotChuyen,HanhDong,MoTa,PhamViHienThi,SoPhienBan)
+                VALUES(@doc,@agency,@user,@id,'TIEP_NHAN',N'Cơ quan nhận đã tiếp nhận văn bản','GIAO_NHAN',@version)",
+                new{doc=row.MaVanBan,agency=actor.MaCoQuan,user=actor.MaNguoiDung,id,version=row.SoPhienBan},tx);
             tx.Commit();return Results.Ok(new{trangThai="DA_TIEP_NHAN"});
         }).RequireAuthorization();
     }

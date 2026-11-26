@@ -19,6 +19,7 @@ public static class VanBanEndpoints
                   JOIN dbo.UyQuyenKyTacVu q ON q.MaTacVu=t.MaTacVu
                   WHERE t.MaVanBan=v.MaVanBan AND t.MaCoQuan=@agency
                     AND t.TrangThai='CHO_XU_LY' AND q.MaCoQuan=@agency
+                    AND q.MaNguoiGoc=t.MaNguoiDuocGiao
                     AND q.MaNguoiDuocUyQuyen=@user AND q.DaThuHoi=0
                     AND q.HieuLucTu<=SYSUTCDATETIME() AND q.HieuLucDen>SYSUTCDATETIME())
         OR (v.DoMat='THUONG' AND EXISTS(

@@ -46,7 +46,11 @@ public static class LuuTruNangCaoEndpoints
                          WHEN DATEADD(YEAR,h.SoNamBaoQuan,l.ThoiDiemXuLy)<SYSUTCDATETIME() THEN 'HET_HAN'
                          WHEN DATEADD(YEAR,h.SoNamBaoQuan,l.ThoiDiemXuLy)<=DATEADD(DAY,90,SYSUTCDATETIME()) THEN 'SAP_HET_HAN'
                          ELSE 'CON_HAN' END AS TinhTrang,
-                    (SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBan hv WHERE hv.MaHoSo=h.MaHoSo) AS SoVanBan
+                    ((SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBan hv
+                      WHERE hv.MaHoSo=h.MaHoSo AND hv.MaCoQuan=@agency)
+                     +(SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBanDen hd
+                       JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                       WHERE hd.MaHoSo=h.MaHoSo AND hd.MaCoQuan=@agency AND d.MaCoQuanNhan=@agency)) AS SoVanBan
                 FROM dbo.HoSoLuuTru h JOIN dbo.LuotNopLuuHoSo l ON l.MaHoSo=h.MaHoSo
                     AND l.MaCoQuan=h.MaCoQuan AND l.TrangThai='DA_TIEP_NHAN'
                 JOIN dbo.NguoiDung n ON n.MaNguoiDung=h.MaNguoiTao
@@ -222,70 +226,128 @@ public static class LuuTruNangCaoEndpoints
             var(actor,_,_,error)=await Quyen(http,auth,db);if(error!=null)return error;
             using var cn=db.Open();
             var id=await HieuLuc(cn,request,actor!);if(id==null)return Results.Forbid();
-            var docs=await cn.QueryAsync(@"SELECT v.MaVanBan,v.MaNoiBo,v.TieuDe,v.TrangThai
+            var docs=await cn.QueryAsync(@"
+                SELECT v.MaVanBan,v.MaNoiBo,v.TieuDe,v.TrangThai,'DI' AS Nguon
                 FROM dbo.HoSoLuuTruVanBan hv JOIN dbo.VanBan v ON v.MaVanBan=hv.MaVanBan
                 WHERE hv.MaHoSo=@id AND hv.MaCoQuan=@agency AND v.MaCoQuan=@agency
-                  AND v.DoMat='THUONG' AND v.TrangThai IN ('DA_PHAT_HANH','DANG_CHUYEN','HOAN_THANH')",
+                  AND v.DoMat='THUONG' AND v.TrangThai IN ('DA_PHAT_HANH','DANG_CHUYEN','HOAN_THANH')
+                UNION ALL
+                SELECT d.MaVanBanDen AS MaVanBan,
+                    CONCAT('DEN-',COALESCE(CONVERT(varchar(15),d.SoDen),'CHUA_CAP'),'-',CONVERT(varchar(4),d.Nam)) AS MaNoiBo,
+                    d.TieuDe,d.TrangThai,'DEN' AS Nguon
+                FROM dbo.HoSoLuuTruVanBanDen hd
+                JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+                JOIN dbo.BanPhatHanh p ON p.MaPhatHanh=l.MaPhatHanh
+                JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
+                WHERE hd.MaHoSo=@id AND hd.MaCoQuan=@agency AND d.MaCoQuanNhan=@agency
+                  AND l.MaCoQuanNhan=@agency AND l.TrangThai='DA_TIEP_NHAN'
+                  AND d.TrangThai='HOAN_THANH' AND v.DoMat='THUONG'",
                 new{id,agency=actor!.MaCoQuan});
             await GhiKhaiThac(cn,request,actor,null,"XEM_DANH_SACH");
             return Results.Ok(docs);
         });
 
         route.MapGet("/access/{request:long}/files/{documentId:guid}",async(long request,Guid documentId,
-            HttpContext http,PhanQuyen auth,Database db)=>{
+            string? nguon,HttpContext http,PhanQuyen auth,Database db)=>{
             var(actor,_,_,error)=await Quyen(http,auth,db);if(error!=null)return error;
+            if(nguon is not (null or "DI" or "DEN"))return Results.BadRequest(new{message="Nguồn văn bản không hợp lệ."});
             using var cn=db.Open();
             var id=await HieuLuc(cn,request,actor!);if(id==null)return Results.Forbid();
-            var allowed=await cn.ExecuteScalarAsync<int>(@"SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBan hv
-                JOIN dbo.VanBan v ON v.MaVanBan=hv.MaVanBan
-                WHERE hv.MaHoSo=@id AND hv.MaVanBan=@documentId AND hv.MaCoQuan=@agency
-                  AND v.MaCoQuan=@agency AND v.DoMat='THUONG'
-                  AND v.TrangThai IN ('DA_PHAT_HANH','DANG_CHUYEN','HOAN_THANH')",
-                new{id,documentId,agency=actor!.MaCoQuan});
-            if(allowed!=1)return Results.NotFound();
-            var file=await cn.QuerySingleOrDefaultAsync<BanPdf>(@"SELECT TOP 1 MaBan,DuongDanLuuTru,MaBamSha256
-                FROM dbo.BanPdfDaKy WHERE MaVanBan=@documentId AND MaCoQuan=@agency
-                ORDER BY ThuTuKy DESC",new{documentId,agency=actor.MaCoQuan});
+            var incoming=nguon=="DEN";
+            if(incoming){
+                if(!await TrongHoSoDen(cn,id.Value,documentId,actor))return Results.NotFound();
+            }else if(!await TrongHoSo(cn,id.Value,documentId,actor))return Results.NotFound();
+            var file=incoming
+                ?await cn.QueryFirstOrDefaultAsync<BanPdf>(@"
+                    SELECT TOP 1 s.MaBan,s.DuongDanLuuTru,s.MaBamSha256
+                    FROM dbo.HoSoLuuTruVanBanDen hd
+                    JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                    JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+                    JOIN dbo.BanPhatHanh p ON p.MaPhatHanh=l.MaPhatHanh
+                    JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
+                    JOIN dbo.BanPdfDaKy s ON s.MaVanBan=p.MaVanBan AND s.MaCoQuan=p.MaCoQuanPhatHanh
+                        AND s.SoPhienBan=p.SoPhienBan AND s.ThuTuKy=v.SoBuocKy
+                        AND s.MaBamSha256=p.MaBamBanCuoi
+                    WHERE hd.MaHoSo=@id AND hd.MaVanBanDen=@documentId AND hd.MaCoQuan=@agency
+                      AND d.MaCoQuanNhan=@agency AND l.MaCoQuanNhan=@agency
+                      AND l.TrangThai='DA_TIEP_NHAN' AND v.DoMat='THUONG'",
+                    new{id,documentId,agency=actor!.MaCoQuan})
+                :await cn.QueryFirstOrDefaultAsync<BanPdf>(@"
+                    SELECT TOP 1 p.MaBan,p.DuongDanLuuTru,p.MaBamSha256
+                    FROM dbo.BanPdfDaKy p JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
+                    WHERE p.MaVanBan=@documentId AND p.MaCoQuan=@agency
+                      AND p.SoPhienBan=v.PhienBanHienTai
+                    ORDER BY p.ThuTuKy DESC",new{documentId,agency=actor!.MaCoQuan});
             if(file==null||!File.Exists(file.DuongDanLuuTru))return Results.NotFound();
             if(!string.Equals(await DichVuKyPdf.Bam(file.DuongDanLuuTru),file.MaBamSha256,StringComparison.OrdinalIgnoreCase))
                 return Results.Conflict(new{message="Tệp PDF đã thay đổi so với mã băm lưu trữ."});
-            await GhiKhaiThac(cn,request,actor,documentId,"TAI_PDF");
+            await GhiKhaiThac(cn,request,actor,documentId,"TAI_PDF",incoming);
             return Results.File(file.DuongDanLuuTru,"application/pdf",$"ho-so-{documentId:N}.pdf");
         });
 
         route.MapGet("/access/{request:long}/attachments/{documentId:guid}",async(long request,Guid documentId,
-            HttpContext http,PhanQuyen auth,Database db)=>{
+            string? nguon,HttpContext http,PhanQuyen auth,Database db)=>{
             var(actor,_,_,error)=await Quyen(http,auth,db);if(error!=null)return error;
+            if(nguon is not (null or "DI" or "DEN"))return Results.BadRequest(new{message="Nguồn văn bản không hợp lệ."});
             using var cn=db.Open();
             var dossier=await HieuLuc(cn,request,actor!);if(dossier==null)return Results.Forbid();
-            if(!await TrongHoSo(cn,dossier.Value,documentId,actor!))return Results.NotFound();
-            var rows=await cn.QueryAsync(@"SELECT f.MaTep,f.TenTep,f.LoaiNoiDung,f.KichThuoc
-                FROM dbo.TepDinhKem f JOIN dbo.PhienBanVanBan pb ON pb.MaPhienBan=f.MaPhienBan
-                JOIN dbo.VanBan v ON v.MaVanBan=pb.MaVanBan
-                WHERE v.MaVanBan=@documentId AND v.MaCoQuan=@agency
-                  AND pb.SoPhienBan=v.PhienBanHienTai AND f.LaVanBanChinh=0 AND f.MaCoQuan=@agency",
-                new{documentId,agency=actor!.MaCoQuan});
-            await GhiKhaiThac(cn,request,actor,documentId,"XEM_TEP_DINH_KEM");
+            var incoming=nguon=="DEN";
+            if(incoming){if(!await TrongHoSoDen(cn,dossier.Value,documentId,actor!))return Results.NotFound();}
+            else if(!await TrongHoSo(cn,dossier.Value,documentId,actor!))return Results.NotFound();
+            var rows=incoming
+                ?await cn.QueryAsync(@"SELECT f.MaTep,f.TenTep,f.LoaiNoiDung,f.KichThuoc
+                    FROM dbo.HoSoLuuTruVanBanDen hd
+                    JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                    JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+                    JOIN dbo.BanPhatHanhTep p ON p.MaPhatHanh=l.MaPhatHanh
+                    JOIN dbo.TepDinhKem f ON f.MaTep=p.MaTep
+                    WHERE hd.MaHoSo=@dossier AND hd.MaCoQuan=@agency AND d.MaVanBanDen=@documentId
+                      AND d.MaCoQuanNhan=@agency AND l.MaCoQuanNhan=@agency AND f.LaVanBanChinh=0
+                    ORDER BY f.TenTep",new{dossier,documentId,agency=actor!.MaCoQuan})
+                :await cn.QueryAsync(@"SELECT f.MaTep,f.TenTep,f.LoaiNoiDung,f.KichThuoc
+                    FROM dbo.TepDinhKem f JOIN dbo.PhienBanVanBan pb ON pb.MaPhienBan=f.MaPhienBan
+                    JOIN dbo.VanBan v ON v.MaVanBan=pb.MaVanBan
+                    WHERE v.MaVanBan=@documentId AND v.MaCoQuan=@agency
+                      AND pb.SoPhienBan=v.PhienBanHienTai AND f.LaVanBanChinh=0 AND f.MaCoQuan=@agency",
+                    new{documentId,agency=actor!.MaCoQuan});
+            await GhiKhaiThac(cn,request,actor,documentId,"XEM_TEP_DINH_KEM",incoming);
             return Results.Ok(rows);
         });
 
         route.MapGet("/access/{request:long}/attachments/{documentId:guid}/{fileId:guid}",async(
-            long request,Guid documentId,Guid fileId,HttpContext http,PhanQuyen auth,Database db)=>{
+            long request,Guid documentId,Guid fileId,string? nguon,HttpContext http,PhanQuyen auth,Database db)=>{
             var(actor,_,_,error)=await Quyen(http,auth,db);if(error!=null)return error;
+            if(nguon is not (null or "DI" or "DEN"))return Results.BadRequest(new{message="Nguồn văn bản không hợp lệ."});
             using var cn=db.Open();
             var dossier=await HieuLuc(cn,request,actor!);if(dossier==null)return Results.Forbid();
-            if(!await TrongHoSo(cn,dossier.Value,documentId,actor!))return Results.NotFound();
-            var file=await cn.QuerySingleOrDefaultAsync<TepKiemTra>(@"SELECT f.MaTep,f.TenTep,f.DuongDanLuuTru,f.MaBamSha256
-                FROM dbo.TepDinhKem f JOIN dbo.PhienBanVanBan pb ON pb.MaPhienBan=f.MaPhienBan
-                JOIN dbo.VanBan v ON v.MaVanBan=pb.MaVanBan
-                WHERE v.MaVanBan=@documentId AND v.MaCoQuan=@agency
-                  AND pb.SoPhienBan=v.PhienBanHienTai AND f.MaTep=@fileId
-                  AND f.LaVanBanChinh=0 AND f.MaCoQuan=@agency",
-                new{documentId,fileId,agency=actor!.MaCoQuan});
+            var incoming=nguon=="DEN";
+            if(incoming){if(!await TrongHoSoDen(cn,dossier.Value,documentId,actor!))return Results.NotFound();}
+            else if(!await TrongHoSo(cn,dossier.Value,documentId,actor!))return Results.NotFound();
+            var file=incoming
+                ?await cn.QuerySingleOrDefaultAsync<TepKiemTra>(@"
+                    SELECT f.MaTep,f.TenTep,f.DuongDanLuuTru,p.MaBamSha256
+                    FROM dbo.HoSoLuuTruVanBanDen hd
+                    JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                    JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+                    JOIN dbo.BanPhatHanhTep p ON p.MaPhatHanh=l.MaPhatHanh
+                    JOIN dbo.TepDinhKem f ON f.MaTep=p.MaTep
+                    WHERE hd.MaHoSo=@dossier AND hd.MaCoQuan=@agency
+                      AND d.MaVanBanDen=@documentId AND d.MaCoQuanNhan=@agency
+                      AND l.MaCoQuanNhan=@agency AND p.MaTep=@fileId AND f.LaVanBanChinh=0",
+                    new{dossier,documentId,fileId,agency=actor!.MaCoQuan})
+                :await cn.QuerySingleOrDefaultAsync<TepKiemTra>(@"
+                    SELECT f.MaTep,f.TenTep,f.DuongDanLuuTru,f.MaBamSha256
+                    FROM dbo.TepDinhKem f JOIN dbo.PhienBanVanBan pb ON pb.MaPhienBan=f.MaPhienBan
+                    JOIN dbo.VanBan v ON v.MaVanBan=pb.MaVanBan
+                    WHERE v.MaVanBan=@documentId AND v.MaCoQuan=@agency
+                      AND pb.SoPhienBan=v.PhienBanHienTai AND f.MaTep=@fileId
+                      AND f.LaVanBanChinh=0 AND f.MaCoQuan=@agency",
+                    new{documentId,fileId,agency=actor!.MaCoQuan});
             if(file==null||!File.Exists(file.DuongDanLuuTru))return Results.NotFound();
             if(!string.Equals(await DichVuKyPdf.Bam(file.DuongDanLuuTru),file.MaBamSha256,StringComparison.OrdinalIgnoreCase))
                 return Results.Conflict(new{message="Tệp đính kèm không còn đúng mã băm SHA-256."});
-            await GhiKhaiThac(cn,request,actor,documentId,"TAI_TEP_DINH_KEM");
+            await GhiKhaiThac(cn,request,actor,documentId,"TAI_TEP_DINH_KEM",incoming);
             return Results.File(file.DuongDanLuuTru,"application/octet-stream",file.TenTep);
         });
 
@@ -297,21 +359,54 @@ public static class LuuTruNangCaoEndpoints
                 WHERE h.MaHoSo=@id AND h.MaCoQuan=@agency AND (h.MaNguoiTao=@user OR @clerk=1 OR @admin=1)
                   AND "+DaNhan,new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung,clerk=clerk?1:0,admin=admin?1:0});
             if(can==0)return Results.NotFound();
-            var files=await cn.QueryAsync<BanPdf>(@"SELECT p.MaBan,p.DuongDanLuuTru,p.MaBamSha256
+            var outgoingFiles=await cn.QueryAsync<BanPdf>(@"SELECT p.MaBan,p.DuongDanLuuTru,p.MaBamSha256
                 FROM dbo.HoSoLuuTruVanBan hv JOIN dbo.VanBan v ON v.MaVanBan=hv.MaVanBan
                 JOIN dbo.BanPdfDaKy p ON p.MaVanBan=v.MaVanBan AND p.MaCoQuan=v.MaCoQuan
                 WHERE hv.MaHoSo=@id AND hv.MaCoQuan=@agency AND v.DoMat='THUONG'
                   AND p.ThuTuKy=(SELECT MAX(p2.ThuTuKy) FROM dbo.BanPdfDaKy p2
                      WHERE p2.MaVanBan=p.MaVanBan AND p2.MaCoQuan=p.MaCoQuan)",new{id,agency=actor.MaCoQuan});
-            var documents=await cn.ExecuteScalarAsync<int>(@"SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBan hv
-                WHERE hv.MaHoSo=@id AND hv.MaCoQuan=@agency",new{id,agency=actor.MaCoQuan});
-            var attachments=await cn.QueryAsync<TepKiemTra>(@"
+            var incomingFiles=await cn.QueryAsync<BanPdf>(@"
+                SELECT s.MaBan,s.DuongDanLuuTru,s.MaBamSha256
+                FROM dbo.HoSoLuuTruVanBanDen hd
+                JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+                JOIN dbo.BanPhatHanh p ON p.MaPhatHanh=l.MaPhatHanh
+                JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
+                JOIN dbo.BanPdfDaKy s ON s.MaVanBan=p.MaVanBan AND s.MaCoQuan=p.MaCoQuanPhatHanh
+                    AND s.SoPhienBan=p.SoPhienBan AND s.ThuTuKy=v.SoBuocKy
+                    AND s.MaBamSha256=p.MaBamBanCuoi
+                WHERE hd.MaHoSo=@id AND hd.MaCoQuan=@agency AND d.MaCoQuanNhan=@agency
+                  AND l.MaCoQuanNhan=@agency AND l.TrangThai='DA_TIEP_NHAN' AND v.DoMat='THUONG'",
+                new{id,agency=actor.MaCoQuan});
+            var files=outgoingFiles.Concat(incomingFiles).ToArray();
+            var documents=await cn.ExecuteScalarAsync<int>(@"
+                SELECT (SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBan hv
+                        WHERE hv.MaHoSo=@id AND hv.MaCoQuan=@agency)
+                     + (SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBanDen hd
+                        JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                        WHERE hd.MaHoSo=@id AND hd.MaCoQuan=@agency AND d.MaCoQuanNhan=@agency)",
+                new{id,agency=actor.MaCoQuan});
+            var outgoingAttachments=await cn.QueryAsync<TepKiemTra>(@"
                 SELECT f.MaTep,f.DuongDanLuuTru,f.MaBamSha256 FROM dbo.HoSoLuuTruVanBan hv
                 JOIN dbo.VanBan v ON v.MaVanBan=hv.MaVanBan
                 JOIN dbo.PhienBanVanBan pb ON pb.MaVanBan=v.MaVanBan AND pb.SoPhienBan=v.PhienBanHienTai
                 JOIN dbo.TepDinhKem f ON f.MaPhienBan=pb.MaPhienBan AND f.MaCoQuan=v.MaCoQuan
                 WHERE hv.MaHoSo=@id AND hv.MaCoQuan=@agency AND v.DoMat='THUONG' AND f.LaVanBanChinh=0",
                 new{id,agency=actor.MaCoQuan});
+            var incomingAttachments=await cn.QueryAsync<TepKiemTra>(@"
+                SELECT f.MaTep,f.DuongDanLuuTru,p.MaBamSha256
+                FROM dbo.HoSoLuuTruVanBanDen hd
+                JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+                JOIN dbo.BanPhatHanh pbh ON pbh.MaPhatHanh=l.MaPhatHanh
+                JOIN dbo.VanBan v ON v.MaVanBan=pbh.MaVanBan
+                JOIN dbo.BanPhatHanhTep p ON p.MaPhatHanh=pbh.MaPhatHanh
+                JOIN dbo.TepDinhKem f ON f.MaTep=p.MaTep
+                WHERE hd.MaHoSo=@id AND hd.MaCoQuan=@agency AND d.MaCoQuanNhan=@agency
+                  AND l.MaCoQuanNhan=@agency AND l.TrangThai='DA_TIEP_NHAN'
+                  AND v.DoMat='THUONG' AND f.LaVanBanChinh=0",
+                new{id,agency=actor.MaCoQuan});
+            var attachments=outgoingAttachments.Concat(incomingAttachments);
             var checks=new List<object>();var ok=0;var bad=0;
             foreach(var file in files){
                 var exists=File.Exists(file.DuongDanLuuTru);
@@ -338,7 +433,7 @@ public static class LuuTruNangCaoEndpoints
         route.MapGet("/audit",async(HttpContext http,PhanQuyen auth,Database db)=>{
             var(actor,clerk,admin,error)=await Quyen(http,auth,db);if(error!=null)return error;
             using var cn=db.Open();
-            return Results.Ok(await cn.QueryAsync(@"SELECT k.MaNhatKy,k.MaYeuCau,k.MaVanBan,k.HanhDong,
+            return Results.Ok(await cn.QueryAsync(@"SELECT k.MaNhatKy,k.MaYeuCau,k.MaVanBan,k.MaVanBanDen,k.HanhDong,
                 k.ThoiDiem,n.HoTen AS NguoiThucHien,h.MaHoSoNoiBo
                 FROM dbo.NhatKyKhaiThacHoSo k JOIN dbo.YeuCauKhaiThacHoSo q ON q.MaYeuCau=k.MaYeuCau
                 JOIN dbo.HoSoLuuTru h ON h.MaHoSo=q.MaHoSo
@@ -361,10 +456,11 @@ public static class LuuTruNangCaoEndpoints
             new{request,agency=actor.MaCoQuan,user=actor.MaNguoiDung});
 
     private static Task<int> GhiKhaiThac(System.Data.IDbConnection cn,long request,
-        NguoiThucHien actor,Guid? document,string action)=>cn.ExecuteAsync(@"
-        INSERT dbo.NhatKyKhaiThacHoSo(MaYeuCau,MaCoQuan,MaNguoiDung,MaVanBan,HanhDong)
-        VALUES(@request,@agency,@user,@document,@action)",new{request,agency=actor.MaCoQuan,
-            user=actor.MaNguoiDung,document,action});
+        NguoiThucHien actor,Guid? document,string action,bool incoming=false)=>cn.ExecuteAsync(@"
+        INSERT dbo.NhatKyKhaiThacHoSo(MaYeuCau,MaCoQuan,MaNguoiDung,MaVanBan,MaVanBanDen,HanhDong)
+        VALUES(@request,@agency,@user,@outgoingId,@incomingId,@action)",new{request,agency=actor.MaCoQuan,
+            user=actor.MaNguoiDung,outgoingId=incoming?(Guid?)null:document,
+            incomingId=incoming?document:(Guid?)null,action});
 
     private static async Task<bool> TrongHoSo(System.Data.IDbConnection cn,Guid dossier,Guid document,
         NguoiThucHien actor)=>await cn.ExecuteScalarAsync<int>(@"
@@ -372,5 +468,18 @@ public static class LuuTruNangCaoEndpoints
         WHERE hv.MaHoSo=@dossier AND hv.MaVanBan=@document AND hv.MaCoQuan=@agency
           AND v.MaCoQuan=@agency AND v.DoMat='THUONG'
           AND v.TrangThai IN ('DA_PHAT_HANH','DANG_CHUYEN','HOAN_THANH')",
+        new{dossier,document,agency=actor.MaCoQuan})>0;
+
+    private static async Task<bool> TrongHoSoDen(System.Data.IDbConnection cn,Guid dossier,Guid document,
+        NguoiThucHien actor)=>await cn.ExecuteScalarAsync<int>(@"
+        SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBanDen hd
+        JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+        JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+        JOIN dbo.BanPhatHanh p ON p.MaPhatHanh=l.MaPhatHanh
+        JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
+        WHERE hd.MaHoSo=@dossier AND hd.MaVanBanDen=@document AND hd.MaCoQuan=@agency
+          AND d.MaCoQuanNhan=@agency AND d.TrangThai='HOAN_THANH'
+          AND l.MaCoQuanNhan=@agency AND l.TrangThai='DA_TIEP_NHAN'
+          AND v.DoMat='THUONG'",
         new{dossier,document,agency=actor.MaCoQuan})>0;
 }
