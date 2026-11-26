@@ -88,6 +88,38 @@ public static class UyQuyenKyEndpoints
     public static void MapUyQuyenKy(this IEndpointRouteBuilder app)
     {
         var group=app.MapGroup("/api/v1/admin/signing-delegations").RequireAuthorization();
+        // Lich su doc truc tiep tu bang 015, khong thay doi cac PDF da ky.
+        group.MapGet("/history",async(HttpContext http,PhanQuyen permission,Database db)=>{
+            var(actor,error)=await permission.YeuCau(http,"permissions.manage");
+            if(error!=null)return error;
+            using var cn=db.Open();
+            var rows=await cn.QueryAsync(@"
+                SELECT q.MaTacVu,q.MaVanBan,v.MaNoiBo,v.TieuDe,t.Buoc,
+                       g.HoTen AS NguoiGoc,d.HoTen AS NguoiDuocUyQuyen,
+                       a.HoTen AS NguoiCap,q.LyDo,q.HieuLucTu,q.HieuLucDen,
+                       q.DaThuHoi,q.ThoiDiemThuHoi,s.ThoiDiemKy,
+                       CASE WHEN s.MaVanBan IS NOT NULL THEN 'DA_KY'
+                            WHEN q.DaThuHoi=1 THEN 'DA_THU_HOI'
+                            WHEN q.HieuLucDen<=SYSUTCDATETIME() THEN 'HET_HAN'
+                            WHEN t.TrangThai<>'CHO_XU_LY' THEN 'DA_KET_THUC'
+                            ELSE 'DANG_HIEU_LUC' END AS TrangThaiUyQuyen
+                FROM dbo.UyQuyenKyTacVu q
+                JOIN dbo.TacVuXuLy t ON t.MaTacVu=q.MaTacVu AND t.MaCoQuan=q.MaCoQuan
+                JOIN dbo.VanBan v ON v.MaVanBan=q.MaVanBan AND v.MaCoQuan=q.MaCoQuan
+                JOIN dbo.NguoiDung g ON g.MaNguoiDung=q.MaNguoiGoc
+                JOIN dbo.NguoiDung d ON d.MaNguoiDung=q.MaNguoiDuocUyQuyen
+                JOIN dbo.NguoiDung a ON a.MaNguoiDung=q.MaNguoiCap
+                OUTER APPLY (SELECT TOP 1 s.ThoiDiemKy,s.MaVanBan FROM dbo.ChuKySo s
+                    WHERE s.MaVanBan=q.MaVanBan AND s.MaCoQuan=q.MaCoQuan
+                      AND s.SoPhienBan=t.PhienBanDuocDuyet AND s.MaNguoiKy=q.MaNguoiDuocUyQuyen
+                      AND ((t.Buoc='KIEM_TRA_NOI_DUNG' AND s.LoaiChuKy='KY_NHAY')
+                        OR (t.Buoc='PHE_DUYET_LANH_DAO' AND s.LoaiChuKy='KY_LANH_DAO'))
+                    ORDER BY s.ThoiDiemKy DESC) s
+                WHERE q.MaCoQuan=@agency
+                ORDER BY q.HieuLucTu DESC,q.MaTacVu",
+                new{agency=actor!.MaCoQuan});
+            return Results.Ok(rows);
+        });
         group.MapGet("/tasks",async(HttpContext http,PhanQuyen permission,Database db)=>{
             var(actor,error)=await permission.YeuCau(http,"permissions.manage");
             if(error!=null)return error;
