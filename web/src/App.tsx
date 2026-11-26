@@ -16,6 +16,7 @@ import SignaturePlacement, { type SignaturePosition } from './SignaturePlacement
 import HoSoPage from './HoSoPage';
 import DieuHanhVanBanDenPanel from './DieuHanhVanBanDenPanel';
 import ChiTietVanBanDen from './ChiTietVanBanDen';
+import ThongTinTaiKhoan from './ThongTinTaiKhoan';
 
 const DEMO = import.meta.env.VITE_DEMO_MODE !== 'false';
 const APP_TITLE = 'Văn thư số';
@@ -1144,6 +1145,7 @@ export default function App() {
   const [filter,setFilter]=useState('ALL');
   const [menuOpen,setMenuOpen]=useState(false);
   const [profileMenu,setProfileMenu]=useState(false);
+  const [profileOpen,setProfileOpen]=useState(false);
   const [notice,setNotice]=useState('');
   const [remoteTimeline,setRemoteTimeline]=useState<{events:SuKien[];transfers:ChuyenPhat[]}|undefined>();
   const [journeyTimeline,setJourneyTimeline]=useState<{events:SuKien[];transfers:ChuyenPhat[]}|undefined>();
@@ -1317,6 +1319,12 @@ export default function App() {
     const body=await res.json();const caps=body.capabilities as string[];
     const liveActor:Actor={username:name,name:body.user.hoTen??body.user.HoTen,agency:'Cơ quan của tôi',position:'Người dùng',capabilities:caps};
     setActor(liveActor);setToken(body.accessToken);
+    try{
+      const profile=await requestApi('/auth/profile',body.accessToken) as Record<string,unknown>;
+      setActor({...liveActor,name:String(field(profile,'HoTen')??liveActor.name),
+        agency:String(field(profile,'TenCoQuan')??liveActor.agency),
+        position:String(field(profile,'ChucVu')??liveActor.position)});
+    }catch{/* Thông tin cơ bản vẫn lấy từ phiên đăng nhập. */}
     const start=navigation.flatMap(g=>g.items).find(i=>caps.includes(i.permission));
     setPage(start?.id??'quan-tri');
     try{
@@ -1326,7 +1334,7 @@ export default function App() {
     if(caps.includes('documents.read'))await refresh(body.accessToken,caps);
   };
 
-  const logout=()=>{setActor(null);setToken('');setSelected(null);setQuery('');setProfileMenu(false);setError('');};
+  const logout=()=>{setActor(null);setToken('');setSelected(null);setQuery('');setProfileMenu(false);setProfileOpen(false);setError('');};
   const go=(next:Trang)=>{if(!menuItems.find(i=>i.id===next))return;setPage(next);setSelected(null);setIncomingFocus('');setFilter('ALL');setQuery('');setMenuOpen(false);};
   const create=async(input:{title:string;excerpt:string;to:string[];urgency:VanBan['urgency'];mainFile:File;files:File[]})=>{
     if(!actor)return;
@@ -1470,6 +1478,7 @@ export default function App() {
         <div className="header-divider"/><button className="user-button" onClick={()=>setProfileMenu(!profileMenu)}>
           <span className="avatar">{initials(actor.name)}</span><span className="user-name"><strong>{actor.name}</strong><small>{actor.position}</small></span><ChevronDown size={16}/></button>
         {profileMenu&&<div className="profile-menu"><div className="profile-menu-title">{actor.username}</div>
+          {!DEMO&&<button onClick={()=>{setProfileMenu(false);setProfileOpen(true);}}><UserRound size={16}/>Thông tin tài khoản</button>}
           {DEMO&&<><div className="profile-caption">Đổi tài khoản minh họa</div>{Object.values(demoUsers).map(u=><button key={u.username}
             onClick={()=>{setActor(u);setPage(u.capabilities.includes('documents.read')?'tong-quan':'quan-tri');setSelected(null);setProfileMenu(false);}}>
             <UserRound size={16}/>{u.username}</button>)}</>}
@@ -1617,6 +1626,9 @@ export default function App() {
           <div className="panel">Chức năng ủy quyền ký chỉ sử dụng khi kết nối API thật.</div>}</>}
     </div>
     </main>
+    {profileOpen&&!DEMO&&<ThongTinTaiKhoan token={token} onClose={()=>setProfileOpen(false)}
+      onNameChanged={name=>setActor(old=>old?{...old,name}:old)}
+      onPasswordChanged={()=>{window.alert('Đã đổi mật khẩu thành công. Vui lòng đăng nhập lại.');logout();}}/>}
     {currentDoc&&currentDoc.type==='DEN'&&!DEMO&&<ChiTietVanBanDen key={currentDoc.id} doc={currentDoc} token={token}
       onClose={()=>setSelected(null)} onProcess={id=>{setSelected(null);setIncomingFocus(id);setPage('van-ban-den');}}/>}
     {currentDoc&&(currentDoc.type!=='DEN'||DEMO)&&<DocumentDetails key={currentDoc.id} doc={currentDoc} onClose={()=>setSelected(null)} onAction={action} allowed={actor}
