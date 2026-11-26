@@ -53,7 +53,7 @@ public static class HoSoEndpoints
             return Results.Ok(await cn.QueryAsync(@"SELECT h.MaHoSo,h.MaHoSoNoiBo,h.TenHoSo,h.LoaiHoSo,h.NamHoSo,
                 h.MaPhongBan,p.TenPhongBan,h.SoNamBaoQuan,h.GhiChu,h.DaDong,h.ThoiDiemTao,
                 h.ThoiDiemCapNhat,n.HoTen AS NguoiTao,
-                (SELECT COUNT(*) FROM dbo.HoSoVanBan hv JOIN dbo.VanBan v ON v.MaVanBan=hv.MaVanBan
+                (SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBan hv JOIN dbo.VanBan v ON v.MaVanBan=hv.MaVanBan
                  WHERE hv.MaHoSo=h.MaHoSo AND v.MaCoQuan=@agency AND v.DoMat='THUONG' " + VanBanEndpoints.PhamViVanBan + @") AS SoVanBan
                 FROM dbo.HoSoLuuTru h LEFT JOIN dbo.PhongBan p ON p.MaPhongBan=h.MaPhongBan
                 JOIN dbo.NguoiDung n ON n.MaNguoiDung=h.MaNguoiTao
@@ -104,7 +104,7 @@ public static class HoSoEndpoints
             if(dossier==null)return Results.NotFound();
             var docs=await cn.QueryAsync(@"SELECT v.MaVanBan,v.MaNoiBo,v.TieuDe,v.SoPhatHanh,v.KyHieu,
                 v.NgayBanHanh,v.TrangThai,hv.ThoiDiemThem,n.HoTen AS NguoiThem
-                FROM dbo.HoSoVanBan hv JOIN dbo.VanBan v ON v.MaVanBan=hv.MaVanBan
+                FROM dbo.HoSoLuuTruVanBan hv JOIN dbo.VanBan v ON v.MaVanBan=hv.MaVanBan
                 JOIN dbo.NguoiDung n ON n.MaNguoiDung=hv.MaNguoiThem
                 WHERE hv.MaHoSo=@id AND hv.MaCoQuan=@agency AND v.MaCoQuan=@agency
                   AND v.DoMat='THUONG' " + VanBanEndpoints.PhamViVanBan + @"
@@ -160,9 +160,9 @@ public static class HoSoEndpoints
                   AND TrangThai IN ('DA_PHAT_HANH','DANG_CHUYEN','HOAN_THANH')",
                 new{body.MaVanBan,agency=actor.MaCoQuan},tx);
             if(published!=1)return Results.BadRequest(new{message="Chỉ được lưu văn bản thường đã phát hành trong cùng cơ quan."});
-            var inserted=await cn.ExecuteAsync(@"INSERT dbo.HoSoVanBan(MaHoSo,MaCoQuan,MaVanBan,MaNguoiThem)
+            var inserted=await cn.ExecuteAsync(@"INSERT dbo.HoSoLuuTruVanBan(MaHoSo,MaCoQuan,MaVanBan,MaNguoiThem)
                 SELECT @id,@agency,@MaVanBan,@user WHERE NOT EXISTS(
-                    SELECT 1 FROM dbo.HoSoVanBan WITH(UPDLOCK,HOLDLOCK)
+                    SELECT 1 FROM dbo.HoSoLuuTruVanBan WITH(UPDLOCK,HOLDLOCK)
                     WHERE MaHoSo=@id AND MaVanBan=@MaVanBan)",
                 new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,body.MaVanBan},tx);
             if(inserted==0)return Results.Conflict(new{message="Văn bản đã có trong hồ sơ."});
@@ -180,7 +180,7 @@ public static class HoSoEndpoints
                 WHERE h.MaHoSo=@id AND h.MaCoQuan=@agency AND h.DaDong=0 AND "+DuocSua,
                 new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,admin},tx);
             if(allowed!=1)return Results.Conflict(new{message="Hồ sơ đã đóng hoặc không thuộc quyền chỉnh sửa."});
-            var count=await cn.ExecuteAsync(@"DELETE FROM dbo.HoSoVanBan
+            var count=await cn.ExecuteAsync(@"DELETE FROM dbo.HoSoLuuTruVanBan
                 WHERE MaHoSo=@id AND MaCoQuan=@agency AND MaVanBan=@documentId",
                 new{id,agency=actor.MaCoQuan,documentId},tx);
             if(count==0)return Results.NotFound();
