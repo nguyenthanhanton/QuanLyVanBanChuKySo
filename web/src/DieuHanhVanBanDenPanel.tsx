@@ -39,10 +39,12 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
   const [reassignOpen,setReassignOpen]=useState(false);
   const [evidence,setEvidence]=useState<Evidence[]>([]);
   const [evidenceFile,setEvidenceFile]=useState<File|null>(null);
+  const [pdfUrl,setPdfUrl]=useState('');
   const [page,setPage]=useState(1);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [error,setError]=useState('');
+  useEffect(()=>()=>{if(pdfUrl)URL.revokeObjectURL(pdfUrl);},[pdfUrl]);
   const api=async(path:string,body?:object):Promise<any>=>{
     const response=await fetch('/api/v1/incoming-work'+path,{method:body?'POST':'GET',
       headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
@@ -104,6 +106,19 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
       window.setTimeout(()=>URL.revokeObjectURL(url),60000);
     }catch(err){setError((err as Error).message);}
   };
+  const viewDocument=async()=>{
+    if(!selected)return;
+    setBusy(true);setError('');
+    try{
+      const response=await fetch(`/api/v1/incoming-work/${selected}/pdf`,{
+        headers:{Authorization:`Bearer ${token}`}});
+      if(!response.ok){
+        const body=await response.json().catch(()=>({}));
+        throw new Error(body.message??`Không thể mở PDF văn bản đến (${response.status}).`);
+      }
+      setPdfUrl(URL.createObjectURL(await response.blob()));
+    }catch(err){setError((err as Error).message);}finally{setBusy(false);}
+  };
   const status=(row:Row)=>row.trangThaiXuLy==='HOAN_THANH'?'Hoàn thành':
     row.trangThaiXuLy==='DANG_XU_LY'?'Đang xử lý':
     row.trangThai==='CHO_LANH_DAO'?'Chờ lãnh đạo giao':'Chờ văn thư trình';
@@ -129,6 +144,7 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
     </div>}
     {picked&&<div className="incoming-work-detail">
       <h3>{picked.tieuDe}</h3>
+      <button className="secondary small" disabled={busy} onClick={viewDocument}>Xem văn bản đến (PDF gốc đã ký)</button>
       {picked.chiDao&&<p><strong>Chỉ đạo:</strong> {picked.chiDao}</p>}
       {data.leader&&picked.trangThai==='CHO_LANH_DAO'&&<div className="incoming-work-form">
         <label>Phòng chủ trì (bắt buộc)<select value={lead} onChange={e=>{
@@ -212,6 +228,13 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
         </div>}
         {picked.ketQuaTongHop&&<p><strong>Kết luận cấp trên:</strong> {picked.ketQuaTongHop}</p>}
       </>}
+    </div>}
+    {pdfUrl&&<div className="incoming-work-preview-overlay" role="dialog" aria-modal="true" aria-label="Xem văn bản đến">
+      <div className="incoming-work-preview">
+        <div className="incoming-work-preview-head"><strong>Văn bản đến — {picked?.tieuDe??''}</strong>
+          <button className="secondary small" onClick={()=>setPdfUrl('')}>Đóng</button></div>
+        <iframe src={pdfUrl} title="PDF văn bản đến"/>
+      </div>
     </div>}
   </section>;
 }
