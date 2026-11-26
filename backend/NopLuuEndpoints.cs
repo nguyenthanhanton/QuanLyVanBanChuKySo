@@ -69,7 +69,13 @@ public static class NopLuuEndpoints
                 WHERE hv.MaHoSo=@id AND hv.MaCoQuan=@agency AND v.MaCoQuan=@agency
                   AND v.DoMat='THUONG' AND v.TrangThai IN ('DA_PHAT_HANH','DANG_CHUYEN','HOAN_THANH')",
                 new{id,agency=actor.MaCoQuan},tx);
-            if(total==0)return Results.BadRequest(new{message="Hồ sơ phải có ít nhất một văn bản thường đã phát hành."});
+            total+=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBanDen hd
+                JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                WHERE hd.MaHoSo=@id AND hd.MaCoQuan=@agency AND d.MaCoQuanNhan=@agency
+                  AND d.SoDen IS NOT NULL AND d.TrangThai='HOAN_THANH'",
+                new{id,agency=actor.MaCoQuan},tx);
+            if(total==0)return Results.BadRequest(new{message="Hồ sơ phải có ít nhất một văn bản đi đã phát hành hoặc văn bản đến hoàn thành."});
             var luot=await cn.ExecuteScalarAsync<long>(@"INSERT dbo.LuotNopLuuHoSo
                 (MaHoSo,MaCoQuan,MaNguoiNop) OUTPUT INSERTED.MaLuot
                 VALUES(@id,@agency,@user)",new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung},tx);
@@ -97,7 +103,13 @@ public static class NopLuuEndpoints
                   AND v.DoMat='THUONG' " + VanBanEndpoints.PhamViVanBan + @"
                 ORDER BY v.ThoiDiemTao DESC",
                 new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung});
-            return Results.Ok(rows);
+            var incoming=await cn.QueryAsync(@"
+                SELECT d.MaVanBanDen AS MaVanBan,CONCAT(N'Số đến ',d.SoDen,N'/',d.Nam) AS MaNoiBo,
+                    d.TieuDe,d.TrangThai
+                FROM dbo.HoSoLuuTruVanBanDen hd JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                WHERE hd.MaHoSo=@id AND hd.MaCoQuan=@agency AND d.MaCoQuanNhan=@agency",
+                new{id,agency=actor.MaCoQuan});
+            return Results.Ok(rows.Concat(incoming));
         });
 
         group.MapPost("/submissions/{luot:long}/decision",async(long luot,QuyetDinhNopLuu body,
@@ -136,7 +148,8 @@ public static class NopLuuEndpoints
                 SELECT l.MaLuot,l.MaBienNhan,l.ThoiDiemNop,l.ThoiDiemXuLy,
                        h.MaHoSoNoiBo,h.TenHoSo,h.NamHoSo,h.SoNamBaoQuan,
                        n.HoTen AS NguoiGiao,v.HoTen AS NguoiNhan,c.TenCoQuan,
-                       (SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBan hv WHERE hv.MaHoSo=h.MaHoSo) AS SoVanBan
+                       (SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBan hv WHERE hv.MaHoSo=h.MaHoSo)
+                       +(SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBanDen hd WHERE hd.MaHoSo=h.MaHoSo) AS SoVanBan
                 FROM dbo.LuotNopLuuHoSo l JOIN dbo.HoSoLuuTru h ON h.MaHoSo=l.MaHoSo
                 JOIN dbo.NguoiDung n ON n.MaNguoiDung=l.MaNguoiNop
                 JOIN dbo.NguoiDung v ON v.MaNguoiDung=l.MaNguoiXuLy
