@@ -603,25 +603,13 @@ public static class KySoEndpoints
             HttpContext http,PhanQuyen permissions,Database db,DichVuKyPdf signer)=>{
             var(actor,error)=await permissions.YeuCau(http,"documents.read");
             if(error!=null)return error;
+            // Dùng cùng SQL scope với GET /documents/{id}, ngay trong truy vấn tải.
             using var cn=db.Open();
             var pdf=await cn.QueryFirstOrDefaultAsync<BanPdf>(@"
                 SELECT TOP 1 p.MaBan,p.DuongDanLuuTru,p.MaBamSha256
                 FROM dbo.BanPdfDaKy p JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
-                WHERE p.MaVanBan=@id AND p.MaCoQuan=@agency AND v.DoMat='THUONG'
-                  AND p.SoPhienBan=v.PhienBanHienTai
-                  AND (v.MaNguoiTao=@user OR EXISTS(SELECT 1 FROM dbo.NguoiDungVaiTro uv
-                      JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
-                      WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency
-                        AND r.MaDinhDanh IN ('TRUONG_PHONG','TRUONG_VAN_PHONG','LANH_DAO','VAN_THU'))
-                    OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t
-                        WHERE t.MaVanBan=v.MaVanBan AND t.MaNguoiDuocGiao=@user AND t.MaCoQuan=@agency)
-                    OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t
-                        JOIN dbo.UyQuyenKyTacVu q ON q.MaTacVu=t.MaTacVu
-                        WHERE t.MaVanBan=v.MaVanBan AND t.MaCoQuan=@agency
-                          AND t.TrangThai='CHO_XU_LY' AND q.MaCoQuan=@agency
-                          AND q.MaNguoiGoc=t.MaNguoiDuocGiao AND q.MaNguoiDuocUyQuyen=@user
-                          AND q.DaThuHoi=0 AND q.HieuLucTu<=SYSUTCDATETIME()
-                          AND q.HieuLucDen>SYSUTCDATETIME()))
+                WHERE p.MaVanBan=@id AND p.MaCoQuan=@agency AND v.MaCoQuan=@agency
+                  AND p.SoPhienBan=v.PhienBanHienTai" + VanBanEndpoints.PhamViVanBan + @"
                 ORDER BY p.ThuTuKy DESC",new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung});
             if(pdf==null || !File.Exists(pdf.DuongDanLuuTru))return Results.NotFound();
             var sha=await DichVuKyPdf.Bam(pdf.DuongDanLuuTru);
@@ -639,20 +627,8 @@ public static class KySoEndpoints
             var pdf=await cn.QueryFirstOrDefaultAsync<BanPdf>(@"
                 SELECT TOP 1 p.MaBan,p.DuongDanLuuTru,p.MaBamSha256 FROM dbo.BanPdfDaKy p
                 JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
-                WHERE p.MaVanBan=@id AND v.MaCoQuan=@agency AND v.DoMat='THUONG'
-                  AND p.SoPhienBan=v.PhienBanHienTai
-                AND (v.MaNguoiTao=@user OR EXISTS(SELECT 1 FROM dbo.NguoiDungVaiTro uv
-                   JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro WHERE uv.MaNguoiDung=@user
-                   AND uv.MaCoQuan=@agency AND r.MaDinhDanh IN ('TRUONG_PHONG','TRUONG_VAN_PHONG','LANH_DAO','VAN_THU'))
-                   OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t WHERE t.MaVanBan=v.MaVanBan
-                       AND t.MaNguoiDuocGiao=@user AND t.MaCoQuan=@agency)
-                    OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t
-                        JOIN dbo.UyQuyenKyTacVu q ON q.MaTacVu=t.MaTacVu
-                        WHERE t.MaVanBan=v.MaVanBan AND t.MaCoQuan=@agency
-                          AND t.TrangThai='CHO_XU_LY' AND q.MaCoQuan=@agency
-                          AND q.MaNguoiGoc=t.MaNguoiDuocGiao AND q.MaNguoiDuocUyQuyen=@user
-                          AND q.DaThuHoi=0 AND q.HieuLucTu<=SYSUTCDATETIME()
-                          AND q.HieuLucDen>SYSUTCDATETIME()))
+                WHERE p.MaVanBan=@id AND p.MaCoQuan=@agency AND v.MaCoQuan=@agency
+                  AND p.SoPhienBan=v.PhienBanHienTai" + VanBanEndpoints.PhamViVanBan + @"
                 ORDER BY p.ThuTuKy DESC",new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung});
             if(pdf==null || !File.Exists(pdf.DuongDanLuuTru))return Results.NotFound();
             if(await DichVuKyPdf.Bam(pdf.DuongDanLuuTru)!=pdf.MaBamSha256)

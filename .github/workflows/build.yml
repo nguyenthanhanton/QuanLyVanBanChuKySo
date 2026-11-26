@@ -1,0 +1,29 @@
+name: Build backend and web
+
+on:
+  push:
+    branches: [feat/v0.5-ky-so-nam-cap, 'fix/**']
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build backend
+        run: dotnet build backend/QuanLyVanBan.Api.csproj --configuration Release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build web
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
