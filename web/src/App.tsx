@@ -1432,11 +1432,26 @@ export default function App() {
           onClick={()=>{setNotificationOpen(x=>!x);setNotificationPage(1);
             if(!DEMO&&token)void requestApi('/monitor/notifications',token).then(setNotifications).catch(()=>{});}}>
           <Bell size={20}/>{notifications.some(n=>!n.DaDoc)&&<span className="notification-count">{Math.min(99,notifications.filter(n=>!n.DaDoc).length)}</span>}</button>
-        {notificationOpen&&<div className="notification-popup"><h3>Thông báo của tôi</h3>
-          {pageRows(notifications,notificationPage).map(n=><button key={`${n.LoaiThongBao}-${n.MaThamChieu}`}
-            className={n.DaDoc?'read':''} onClick={()=>void markNotification(n)}>
-            <strong>{n.TieuDe}</strong><small>{n.MaNoiBo} · {formatDate(n.ThoiDiem)} · {n.MucDo==='QUA_HAN'?'Quá hạn':n.MucDo==='SAP_DEN_HAN'?'Sắp đến hạn':''}</small>
-          </button>)}
+        {notificationOpen&&<div className="notification-popup"><div className="notification-heading">
+          <h3>Thông báo của tôi</h3><span>{notifications.filter(n=>!n.DaDoc).length} chưa đọc</span></div>
+          <div className="notification-list">{pageRows(notifications,notificationPage).map(n=>{
+            const incoming=n.LoaiThongBao.startsWith('DEN_');
+            const overdue=n.MucDo==='QUA_HAN';
+            const soon=n.MucDo==='SAP_DEN_HAN';
+            const Icon=overdue?CircleAlert:soon?Clock3:incoming?Inbox:n.LoaiThongBao==='SU_KIEN'?FileCheck2:FileClock;
+            return <button key={`${n.LoaiThongBao}-${n.MaThamChieu}`}
+              className={`notification-item ${n.DaDoc?'read':'unread'} ${overdue?'overdue':soon?'soon':''}`}
+              onClick={()=>void markNotification(n)}>
+              <span className="notification-item-icon"><Icon size={19}/></span>
+              <span className="notification-item-body"><span className="notification-item-top"><strong>{n.TieuDe}</strong>
+                {!n.DaDoc&&<span className="notification-unread-indicator" title="Chưa đọc"/>}</span>
+                <small className="notification-item-code">{n.MaNoiBo}</small>
+                <span className="notification-item-bottom"><small>{formatDate(n.ThoiDiem)}</small>
+                  {(overdue||soon)&&<span className={`notification-severity ${overdue?'danger':'warning'}`}>
+                    {overdue?'Quá hạn':'Sắp đến hạn'}</span>}</span>
+              </span><ChevronRight className="notification-item-chevron" size={16}/>
+            </button>;
+          })}</div>
           {notifications.length===0&&<p>Chưa có thông báo.</p>}
           <Pagination total={notifications.length} page={notificationPage} onPage={setNotificationPage}/>
         </div>}
