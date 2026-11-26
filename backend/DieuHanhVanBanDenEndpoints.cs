@@ -372,6 +372,51 @@ public static class DieuHanhVanBanDenEndpoints
             return Results.File(pdf.DuongDanLuuTru,"application/pdf");
         });
 
+        group.MapGet("/{id:guid}/attachments",async(Guid id,HttpContext http,PhanQuyen permissions,Database db)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor?.MaCoQuan is null)return Results.Unauthorized();
+            using var cn=db.Open();
+            if(!await CoQuyenXemXuLy(cn,actor,id))return Results.NotFound();
+            var files=await cn.QueryAsync(@"
+                SELECT f.MaTep,f.TenTep,f.LoaiNoiDung,f.KichThuoc
+                FROM dbo.VanBanDen d
+                JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+                JOIN dbo.BanPhatHanhTep p ON p.MaPhatHanh=l.MaPhatHanh
+                JOIN dbo.TepDinhKem f ON f.MaTep=p.MaTep
+                WHERE d.MaVanBanDen=@id AND d.MaCoQuanNhan=@agency
+                  AND l.MaCoQuanNhan=@agency AND l.TrangThai='DA_TIEP_NHAN'
+                ORDER BY f.TenTep",new{id,agency=actor.MaCoQuan});
+            return Results.Ok(files);
+        });
+
+        group.MapGet("/{id:guid}/attachments/{fileId:guid}",async(Guid id,Guid fileId,
+            HttpContext http,PhanQuyen permissions,Database db)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor?.MaCoQuan is null)return Results.Unauthorized();
+            using var cn=db.Open();
+            if(!await CoQuyenXemXuLy(cn,actor,id))return Results.NotFound();
+            var file=await cn.QueryFirstOrDefaultAsync<TepMinhChungRow>(@"
+                SELECT f.DuongDanLuuTru,f.TenTep,f.LoaiNoiDung,p.MaBamSha256
+                FROM dbo.VanBanDen d
+                JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+                JOIN dbo.BanPhatHanhTep p ON p.MaPhatHanh=l.MaPhatHanh
+                JOIN dbo.TepDinhKem f ON f.MaTep=p.MaTep
+                WHERE d.MaVanBanDen=@id AND d.MaCoQuanNhan=@agency
+                  AND l.MaCoQuanNhan=@agency AND l.TrangThai='DA_TIEP_NHAN' AND p.MaTep=@fileId",
+                new{id,agency=actor.MaCoQuan,fileId});
+            if(file is null)return Results.NotFound();
+            if(!File.Exists(file.DuongDanLuuTru) ||
+               await DichVuKyPdf.Bam(file.DuongDanLuuTru)!=file.MaBamSha256)
+                return Results.Conflict(new{message="Tệp đính kèm phát hành không còn nguyên vẹn."});
+            http.Response.Headers["X-Content-Type-Options"]="nosniff";
+            if(http.Request.Query.ContainsKey("preview")){
+                try{var preview=DichVuTepVanBan.XemTruocOffice(file.DuongDanLuuTru);
+                    return preview is null?Results.StatusCode(415):Results.Text(preview,"text/plain; charset=utf-8");}
+                catch(InvalidDataException){return Results.BadRequest(new{message="Tệp Office không đọc được."});}
+            }
+            return Results.File(file.DuongDanLuuTru,file.LoaiNoiDung,file.TenTep);
+        });
+
         group.MapPost("/{id:guid}/evidence",async(Guid id,HttpContext http,PhanQuyen permissions,
             Database db,IConfiguration config)=>{
             var actor=await permissions.NguoiHienTai(http);
