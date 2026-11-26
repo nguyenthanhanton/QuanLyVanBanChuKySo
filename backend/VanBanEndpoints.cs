@@ -10,7 +10,7 @@ public static class VanBanEndpoints
 {
     // Bo loc pham vi su dung cho moi duong doc; khong dua vao an menu de bao mat.
     // Tai lieu MAT chi xem khi la nguoi tao hoac nguoi duoc giao dich danh.
-    private const string PhamViVanBan = @"
+    internal const string PhamViVanBan = @"
       AND (
         v.MaNguoiTao=@user
         OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t
