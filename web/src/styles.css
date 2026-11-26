@@ -236,6 +236,19 @@
 .notification-severity.danger{background:#ffe5e5;color:#b82d3e}
 .notification-severity.warning{background:#fff0d1;color:#95600d}
 .notification-item-chevron{color:#95abc1;flex:none;margin-top:9px}
+.incoming-detail-modal{width:min(1300px,100%);height:min(94vh,1100px);display:flex;flex-direction:column;overflow:hidden;background:white;border-radius:13px;box-shadow:0 18px 65px #081c3633}
+.incoming-detail-head{padding:17px 22px;border-bottom:1px solid #e6edf5;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.incoming-detail-head small{font-size:10px;font-weight:750;letter-spacing:.8px;color:#6786ac}
+.incoming-detail-head h2{font-size:18px;margin:7px 0 0;color:#183653;overflow-wrap:anywhere}
+.incoming-detail-content{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,310px);gap:15px;padding:17px;min-height:0;flex:1}
+.incoming-detail-section,.incoming-detail-side{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0}
+.incoming-detail-section h3,.incoming-detail-side h3{font-size:13px;margin:0;display:flex;align-items:center;gap:8px;color:#24476b}
+.incoming-detail-section iframe{width:100%;flex:1;border:1px solid #dbe5f0;border-radius:9px;background:#f5f7fa;min-height:200px}
+.incoming-detail-side{overflow:auto;padding:14px;border:1px solid #e5ecf4;border-radius:10px;background:#fafcff;align-self:stretch}
+.incoming-detail-side p{font-size:12px;line-height:1.55;margin:0;overflow-wrap:anywhere}
+.incoming-detail-attachments{padding-top:14px;border-top:1px solid #e5ecf4;display:grid;gap:10px}
+.incoming-detail-side>.primary{margin-top:auto;justify-content:center}
+@media(max-width:760px){.incoming-detail-content{grid-template-columns:minmax(0,1fr);overflow-y:auto}.incoming-detail-section{min-height:350px}.incoming-detail-side{overflow:visible}.incoming-detail-modal{height:min(95vh,1100px)}}
 .incoming-evidence-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-top:12px}
 .incoming-evidence-card,.incoming-evidence-selection{display:flex;flex-direction:column;align-items:flex-start;gap:8px;border:1px solid #dce5f2;border-radius:10px;padding:10px;background:#fff;min-width:0}
 .incoming-evidence-card img{display:block;width:100%;height:150px;object-fit:contain;background:#f4f6fa;border-radius:6px}
