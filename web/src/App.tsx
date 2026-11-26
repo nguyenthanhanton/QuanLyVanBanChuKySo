@@ -1103,6 +1103,18 @@ export default function App() {
       try{setRemoteTimeline(await fetchTimeline(d));}catch(err){setError((err as Error).message);}
     }
   };
+  const openWorkqueueDocument=async(task:Record<string,unknown>)=>{
+    const id=String(field(task,'MaVanBan')??'');
+    const existing=visibleDocs.find(d=>d.id===id);
+    if(existing){await openDoc(existing);return;}
+    if(!token||!id)return;
+    try{
+      const response=await requestApi(`/documents/${id}`,token) as Record<string,unknown>;
+      const document=adaptLiveDocument(response);
+      setDocs(previous=>previous.some(d=>d.id===id)?previous:[...previous,document]);
+      await openDoc(document);
+    }catch(err){setError(`Không thể mở văn bản của tác vụ: ${(err as Error).message}`);}
+  };
   const pickJourney=async(d:VanBan)=>{
     setJourneyPick(d.id);setJourneyTimeline(undefined);
     if(!DEMO&&token){
@@ -1333,7 +1345,7 @@ export default function App() {
       {page==='cong-viec'&&<><div className="page-intro compact"><div><div className="overline">HÀNG ĐỢI CÔNG VIỆC</div><h1>Việc cần xử lý</h1><p>Các văn bản đang chờ bạn kiểm tra, phê duyệt hoặc giải quyết.</p></div></div>
         <div className="panel tasks-panel"><div className="panel-head"><h3>Công việc của tôi</h3><span className="count-bubble">{DEMO?visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length:workqueue.length}</span></div>
           {DEMO?visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).map(d=><button className="task-row" key={d.id} onClick={()=>openDoc(d)}><div className="task-icon"><FileClock size={20}/></div><div><strong>{d.title}</strong><small>{d.code} · Hạn {formatDate(d.dueAt)}</small></div><Status status={d.status}/><ChevronRight size={18}/></button>)
-           :workqueue.map(t=><button className="task-row" key={String(field(t,'MaTacVu'))} onClick={()=>{const d=visibleDocs.find(v=>v.id===field(t,'MaVanBan'));if(d)openDoc(d);}}><div className="task-icon"><FileClock size={20}/></div><div><strong>{String(field(t,'TieuDe'))}</strong><small>{String(field(t,'MaNoiBo'))} · {String(field(t,'Buoc'))}</small></div><Status status="CHO_DUYET"/><ChevronRight size={18}/></button>)}
+           :workqueue.map(t=><button className="task-row" key={String(field(t,'MaTacVu'))} onClick={()=>void openWorkqueueDocument(t)}><div className="task-icon"><FileClock size={20}/></div><div><strong>{String(field(t,'TieuDe'))}</strong><small>{String(field(t,'MaNoiBo'))} · {String(field(t,'Buoc'))}</small></div><Status status="CHO_DUYET"/><ChevronRight size={18}/></button>)}
           {DEMO&&visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length===0&&<EmptyView title="Không có việc đang chờ" message="Các công việc được giao sẽ hiện tại đây." icon={CheckCheck}/>}</div></>}
 
       {page==='giao-nhan'&&<><div className="page-intro compact"><div><div className="overline">CHUYỂN PHÁT LIÊN CƠ QUAN</div><h1>Giao nhận văn bản</h1><p>Biên nhận được theo dõi độc lập tại mỗi cơ quan nhận.</p></div></div>
