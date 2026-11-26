@@ -4,11 +4,11 @@
 
 1. Trên nhánh `feat/v0.5-ky-so-nam-cap`, kéo cập nhật mới nhất từ GitHub.
 2. **Sao lưu cơ sở dữ liệu** `QuanLyVanBanChuKySo` trước khi cập nhật.
-3. Chạy toàn bộ `database/017_ho_so_luu_tru.sql` trong SSMS. Kiểm tra:
+3. Chạy toàn bộ `database/017_ho_so_luu_tru.sql` rồi `database/018_lien_ket_ho_so_070.sql` trong SSMS. Nếu đã chạy 017 thì **chỉ cần chạy 018**. Bảng `dbo.HoSoVanBan` phiên bản cũ được giữ nguyên. Kiểm tra:
 
    ```sql
    USE QuanLyVanBanChuKySo;
-   SELECT SoPhienBan,TenPhienBan FROM dbo.PhienBanLuocDo WHERE SoPhienBan=17;
+   SELECT SoPhienBan,TenPhienBan FROM dbo.PhienBanLuocDo WHERE SoPhienBan IN (17,18);
    ```
 
 4. Khởi động backend bằng `./start-backend.ps1` **ở thư mục gốc dự án** (trong PowerShell dùng `.\start-backend.ps1`), frontend trong `web` bằng `npm run dev`.
