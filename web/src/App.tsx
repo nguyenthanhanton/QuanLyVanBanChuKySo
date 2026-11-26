@@ -854,6 +854,7 @@ function UserAdministration({token,username,canManagePermissions}:{token:string;
 function SignerPicker({doc,token,onClose,onSubmit}:{doc:VanBan;token:string;onClose:()=>void;
   onSubmit:(choice:SigningChoice)=>void}){
   const [leaderDraft,setLeaderDraft]=useState(false);
+  const [clerkDraft,setClerkDraft]=useState(false);
   const [reviewers,setReviewers]=useState<SignerOption[]>([]);
   const [leaders,setLeaders]=useState<SignerOption[]>([]);
   const [reviewer,setReviewer]=useState(0);
@@ -876,15 +877,17 @@ function SignerPicker({doc,token,onClose,onSubmit}:{doc:VanBan;token:string;onCl
       setReviewers(a);setLeaders(b);setReviewer(a[0]?.MaNguoiDung??0);setLeader(b[0]?.MaNguoiDung??0);
       setRole(String(field(data,'vaiTroKyNhay')??''));
       setLeaderDraft(Boolean(field(data,'boQuaKyNhay')));
+      setClerkDraft(Boolean(field(data,'vanThuSoan')));
     }).catch(e=>{if(active)setError((e as Error).message);}).finally(()=>{if(active)setLoading(false);});
     return ()=>{active=false;};
   },[doc.id,token]);
   return <div className="preview-backdrop" onClick={onClose}><div className="signer-picker" onClick={e=>e.stopPropagation()}>
     <h3>Chọn người được phép ký văn bản</h3>
     <p className="fine-note">{leaderDraft?'Lãnh đạo soạn: chọn lãnh đạo khác ký duyệt ở bước 2, sau đó văn thư ký cơ quan ở bước 3. Không trình qua trưởng phòng.':
+      clerkDraft?'Văn thư soạn: chọn một Trưởng phòng bất kỳ trong cơ quan ký nháy ở bước 2; tiếp theo lãnh đạo ký duyệt và văn thư ký số cơ quan.':
       'Người soạn đã ký bước 1. Chọn trưởng/phó trưởng đơn vị ký nháy (bước 2), lãnh đạo ký duyệt (bước 3), văn thư ký cơ quan (bước 4).'}</p>
     {loading?<p>Đang tải danh sách người ký...</p>:<>
-      {!leaderDraft&&<label>{role==='TRUONG_VAN_PHONG'?'Trưởng văn phòng ký nháy':
+      {!leaderDraft&&<label>{clerkDraft?'Chọn Trưởng phòng ký nháy (toàn cơ quan)':role==='TRUONG_VAN_PHONG'?'Trưởng văn phòng ký nháy':
         role==='PHO_VAN_PHONG'?'Phó trưởng văn phòng ký nháy':
         role==='PHO_PHONG'?'Phó trưởng phòng ký nháy':'Trưởng phòng / người được ủy quyền ký nháy'}
         <select value={reviewer} onChange={e=>setReviewer(Number(e.target.value))}>
@@ -894,7 +897,9 @@ function SignerPicker({doc,token,onClose,onSubmit}:{doc:VanBan;token:string;onCl
         <select value={leader} onChange={e=>setLeader(Number(e.target.value))}>
           {leaders.map(p=><option key={p.MaNguoiDung} value={p.MaNguoiDung}>{p.HoTen} — {p.VaiTroKy}</option>)}
         </select></label>
-      {((!leaderDraft&&!reviewers.length)||!leaders.length)&&<div className="form-error">Chưa có người ký phù hợp và khác người soạn. Cần bổ nhiệm người ký đúng vai trò; lãnh đạo cấp trưởng soạn thì chỉ chọn các cấp phó, lãnh đạo cấp phó soạn có thể chọn cấp trưởng hoặc cấp phó khác.</div>}
+      {((!leaderDraft&&!reviewers.length)||!leaders.length)&&<div className="form-error">{clerkDraft&&!reviewers.length?
+        'Không tìm thấy Trưởng phòng đang hoạt động trong cơ quan. Hãy kiểm tra chức vụ và phòng ban của các tài khoản trong Quản trị tài khoản.':
+        'Chưa có người ký phù hợp và khác người soạn. Cần bổ nhiệm người ký đúng vai trò; lãnh đạo cấp trưởng soạn thì chỉ chọn các cấp phó, lãnh đạo cấp phó soạn có thể chọn cấp trưởng hoặc cấp phó khác.'}</div>}
     </>}
     {error&&<div className="form-error">{error}</div>}
     <div className="signature-step-actions"><button className="secondary" onClick={onClose}>Hủy</button>
