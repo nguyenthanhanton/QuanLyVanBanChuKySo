@@ -1301,7 +1301,7 @@ export default function App() {
       loaiThongBao:n.LoaiThongBao,maThamChieu:n.MaThamChieu})});
       setNotifications(old=>old.map(x=>x.MaThamChieu===n.MaThamChieu&&x.LoaiThongBao===n.LoaiThongBao?{...x,DaDoc:true}:x));
       setNotificationOpen(false);
-      if(n.LoaiThongBao.startsWith('DEN_')){
+      if(n.LoaiThongBao.startsWith('DEN_')||n.LoaiThongBao==='SU_KIEN_DEN'){
         setIncomingFocus(n.MaVanBan);setPage('van-ban-den');setSelected(null);return;
       }
       await openMonitoredDocument(n.MaVanBan);
@@ -1447,7 +1447,7 @@ export default function App() {
         {notificationOpen&&<div className="notification-popup"><div className="notification-heading">
           <h3>Thông báo của tôi</h3><span>{notifications.filter(n=>!n.DaDoc).length} chưa đọc</span></div>
           <div className="notification-list">{pageRows(notifications,notificationPage).map(n=>{
-            const incoming=n.LoaiThongBao.startsWith('DEN_');
+            const incoming=n.LoaiThongBao.startsWith('DEN_')||n.LoaiThongBao==='SU_KIEN_DEN';
             const overdue=n.MucDo==='QUA_HAN';
             const soon=n.MucDo==='SAP_DEN_HAN';
             const Icon=overdue?CircleAlert:soon?Clock3:incoming?Inbox:n.LoaiThongBao==='SU_KIEN'?FileCheck2:FileClock;
