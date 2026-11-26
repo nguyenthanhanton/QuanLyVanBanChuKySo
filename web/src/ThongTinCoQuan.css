@@ -1,4 +1,4 @@
-.agency-settings{margin-bottom:22px;min-width:0;overflow:hidden}
+.agency-settings{margin-bottom:22px;min-width:0;width:100%;max-width:1250px;box-sizing:border-box;overflow:hidden}
 .agency-settings-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:20px 24px;align-items:end}
 .agency-settings-form label{display:flex;flex-direction:column;gap:7px;min-width:0;color:#314c6c;font-size:13px;font-weight:600}
 .agency-settings-form input{width:100%;min-width:0;height:41px;border:1px solid #d2dfef;border-radius:9px;padding:0 12px;color:#17375a;background:#fff}
