@@ -150,7 +150,13 @@ public static class DieuHanhVanBanDenEndpoints
                 WHERE a.MaVanBanDen=@id",new{id});
             var actorDepartment=await cn.ExecuteScalarAsync<int?>(@"SELECT MaPhongBan FROM dbo.NguoiDung WHERE MaNguoiDung=@user",
                 new{user=actor.MaNguoiDung});
-            return Results.Ok(new{rooms,employees,assigned,actorDepartment,canAssign=manager});
+            var canReport=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.PhanCongCaNhanVanBanDen a
+                JOIN dbo.PhanCongVanBanDen p ON p.MaVanBanDen=a.MaVanBanDen
+                WHERE a.MaVanBanDen=@id AND a.MaNguoiChuTri=@user AND p.MaCoQuan=@agency
+                  AND p.TrangThai='DANG_XU_LY'",
+                new{id,user=actor.MaNguoiDung,agency=actor.MaCoQuan})>0;
+            return Results.Ok(new{rooms,employees,assigned,actorDepartment,canAssign=manager,canReport});
         });
 
         group.MapPost("/{id:guid}/people",async(Guid id,GiaoCaNhanVanBanDen body,HttpContext http,
