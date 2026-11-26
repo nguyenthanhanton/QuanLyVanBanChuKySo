@@ -159,6 +159,20 @@ type MonitorNotification={MaThamChieu:string;LoaiThongBao:string;MaVanBan:string
   TieuDe:string;ThoiDiem:string;MucDo:string;DaDoc:boolean};
 const deadlineLabels:Record<string,string>={HOAN_THANH:'Đã hoàn thành',QUA_HAN:'Quá hạn',
   SAP_DEN_HAN:'Sắp đến hạn',TRONG_HAN:'Trong hạn',CHUA_DAT_HAN:'Chưa đặt hạn'};
+const PAGE_SIZE=15;
+function pageRows<T>(rows:T[],page:number):T[]{
+  const safe=Math.min(Math.max(page,1),Math.max(1,Math.ceil(rows.length/PAGE_SIZE)));
+  return rows.slice((safe-1)*PAGE_SIZE,safe*PAGE_SIZE);
+}
+function Pagination({total,page,onPage}:{total:number;page:number;onPage:(page:number)=>void}){
+  const pages=Math.max(1,Math.ceil(total/PAGE_SIZE));
+  if(total<=PAGE_SIZE)return null;
+  const current=Math.min(Math.max(page,1),pages);
+  return <div className="pagination-controls"><span>{(current-1)*PAGE_SIZE+1}–{Math.min(current*PAGE_SIZE,total)} / {total} kết quả</span>
+    <button className="secondary small" disabled={current===1} onClick={()=>onPage(current-1)}>Trước</button>
+    <span>Trang {current}/{pages}</span>
+    <button className="secondary small" disabled={current===pages} onClick={()=>onPage(current+1)}>Sau</button></div>;
+}
 
 function Login({onLogin}:{onLogin:(name:string,password:string)=>Promise<void>}) {
   const [name,setName]=useState('vanthu_a');
@@ -210,8 +224,10 @@ function ProgressLine({doc}:{doc:VanBan}) {
 }
 
 function Timeline({doc}:{doc:VanBan}) {
+  const [timelinePage,setTimelinePage]=useState(1);
+  const events=[...doc.events].reverse();
   return <div className="timeline">
-    {[...doc.events].reverse().map((event,i)=><div className="timeline-entry" key={event.id}>
+    {pageRows(events,timelinePage).map((event,i)=><div className="timeline-entry" key={event.id}>
       <div className="timeline-rail"><span className={`timeline-node ${event.state}`}>
         {event.state==='warning'?<CircleAlert size={15}/>:event.state==='current'?<Clock3 size={15}/>:<Check size={15}/>}</span>
         {i!==doc.events.length-1&&<span className="timeline-stem"/>}</div>
@@ -222,17 +238,19 @@ function Timeline({doc}:{doc:VanBan}) {
       </div>
     </div>)}
     {doc.events.length===0 && <div className="empty-state">Chưa có sự kiện hành trình.</div>}
+    <Pagination total={events.length} page={timelinePage} onPage={setTimelinePage}/>
   </div>;
 }
 
 function TransferCards({doc}:{doc:VanBan}) {
+  const [transferPage,setTransferPage]=useState(1);
   if(doc.transfers.length===0) return <div className="empty-card"><Network size={26}/><strong>Chưa phát hành liên cơ quan</strong><span>Khi văn bản được phát hành, nơi nhận và biên nhận sẽ xuất hiện ở đây.</span></div>;
-  return <div className="transfer-cards">{doc.transfers.map(t=><div className="transfer-card" key={t.id}>
+  return <div className="transfer-cards">{pageRows(doc.transfers,transferPage).map(t=><div className="transfer-card" key={t.id}>
     <div className="transfer-card-top"><div className="agency-icon"><Building2 size={18}/></div><div className="transfer-name"><strong>{t.agency}</strong><span>{t.contact}</span></div><Status status={t.status} small/></div>
     <div className="transfer-meta"><span>Thời gian gửi</span><strong>{formatDate(t.sentAt)}</strong></div>
     <div className="transfer-meta"><span>Tiếp nhận</span><strong>{formatDate(t.receivedAt)}</strong></div>
     {t.note && <p className="transfer-note">{t.note}</p>}
-  </div>)}</div>;
+  </div>)}<Pagination total={doc.transfers.length} page={transferPage} onPage={setTransferPage}/></div>;
 }
 
 function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:Actor|null;token:string;onUpdated:()=>Promise<void>;taskStep?:string}) {
@@ -419,6 +437,7 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
 
 function LiveDeliveries({token,direction,onUpdated}:{token:string;direction:'out'|'in';onUpdated:()=>Promise<void>}) {
   const [rows,setRows]=useState<Record<string,unknown>[]>([]);
+  const [deliveryListPage,setDeliveryListPage]=useState(1);
   const [busy,setBusy]=useState('');const [error,setError]=useState('');
   const [expanded,setExpanded]=useState('');
   const [attachments,setAttachments]=useState<Record<string,Record<string,unknown>[]>>({});
@@ -453,7 +472,7 @@ function LiveDeliveries({token,direction,onUpdated}:{token:string;direction:'out
     <div className="panel-head"><div><h3>{direction==='out'?'Sổ chuyển phát đi':'Hộp nhận văn bản đã phát hành'}</h3>
       <p>{rows.length} lượt chuyển phát của cơ quan</p></div><button className="secondary small" onClick={()=>load().catch(err=>setError((err as Error).message))}><RefreshCw size={15}/> Tải lại</button></div>
     {error&&<div className="form-error"><CircleAlert size={17}/>{error}</div>}
-    {rows.map(row=>{
+    {pageRows(rows,deliveryListPage).map(row=>{
       const id=String(field(row,'MaLuotChuyen'));
       const status=String(field(row,'TrangThai')) as ChuyenPhat['status'];
       return <div className="delivery-live-row" key={id}>
@@ -483,6 +502,7 @@ function LiveDeliveries({token,direction,onUpdated}:{token:string;direction:'out
       </div>;
     })}
     {rows.length===0&&<EmptyView icon={Inbox} title="Chưa có lượt chuyển" message={direction==='in'?'Cơ quan gửi chưa chuyển văn bản nào đến bạn.':'Hãy phát hành một văn bản đã ký để tạo lượt chuyển.'}/>}
+    <Pagination total={rows.length} page={deliveryListPage} onPage={setDeliveryListPage}/>
     {preview&&<FilePreview path={preview.path} filename={preview.name} token={token} onClose={()=>setPreview(null)}/>}
   </div>;
 }
@@ -585,6 +605,7 @@ function SigningDelegationAdministration({token}:{token:string}){
   const [reason,setReason]=useState('');const [busy,setBusy]=useState(false);
   const [history,setHistory]=useState<SigningDelegationHistory[]>([]);
   const [historyFilter,setHistoryFilter]=useState('ALL');
+  const [historyPage,setHistoryPage]=useState(1);
   const [error,setError]=useState('');const [message,setMessage]=useState('');
   const load=async()=>{
     const [raw,historyRaw]=await Promise.all([
@@ -623,6 +644,7 @@ function SigningDelegationAdministration({token}:{token:string}){
   const current=tasks.find(t=>t.MaTacVu===task);
   const active=!!current?.MaNguoiDuocUyQuyen&&!current.DaThuHoi&&!!current.HieuLucDen&&
     new Date(current.HieuLucDen).getTime()>Date.now();
+  const filteredHistory=history.filter(h=>historyFilter==='ALL'||h.TrangThaiUyQuyen===historyFilter);
   const submit=async(action:'grant'|'revoke')=>{
     if(!current)return;
     setBusy(true);setError('');setMessage('');
@@ -663,12 +685,12 @@ function SigningDelegationAdministration({token}:{token:string}){
     <div className="admin-delegation-history">
       <div className="panel-head"><div><h3>Lịch sử ủy quyền ký thay</h3>
         <p>Lưu người giao, người ký thay, thời hạn và lý do; bao gồm cả tác vụ đã hoàn thành.</p></div>
-        <label>Trạng thái <select value={historyFilter} onChange={e=>setHistoryFilter(e.target.value)}>
+        <label>Trạng thái <select value={historyFilter} onChange={e=>{setHistoryFilter(e.target.value);setHistoryPage(1);}}>
           <option value="ALL">Tất cả</option><option value="DANG_HIEU_LUC">Đang hiệu lực</option>
           <option value="DA_KY">Đã ký thay</option><option value="HET_HAN">Hết hạn</option>
           <option value="DA_THU_HOI">Đã thu hồi</option><option value="DA_KET_THUC">Tác vụ kết thúc</option>
         </select></label></div>
-      {history.filter(h=>historyFilter==='ALL'||h.TrangThaiUyQuyen===historyFilter).map(h=><div className="admin-delegation-history-row" key={h.MaTacVu}>
+      {pageRows(filteredHistory,historyPage).map(h=><div className="admin-delegation-history-row" key={h.MaTacVu}>
         <div className="admin-delegation-history-head"><strong>{h.TieuDe} · {h.MaNoiBo}</strong>
           <span>{({'DANG_HIEU_LUC':'Đang hiệu lực','DA_KY':'Đã ký thay','HET_HAN':'Hết hạn',
             'DA_THU_HOI':'Đã thu hồi','DA_KET_THUC':'Tác vụ đã kết thúc'} as Record<string,string>)[h.TrangThaiUyQuyen]??h.TrangThaiUyQuyen}</span></div>
@@ -679,6 +701,7 @@ function SigningDelegationAdministration({token}:{token:string}){
         {h.ThoiDiemThuHoi&&<p>Thu hồi: {formatDate(h.ThoiDiemThuHoi)}</p>}
       </div>)}
       {history.length===0&&<p className="fine-note">Chưa có lịch sử ủy quyền trong cơ quan.</p>}
+      <Pagination total={filteredHistory.length} page={historyPage} onPage={setHistoryPage}/>
     </div>
     {error&&<div className="form-error">{error}</div>}{message&&<p className="success-note">{message}</p>}
   </section>;
@@ -716,6 +739,7 @@ type ManagedDepartment={MaPhongBan:number;MaDinhDanh:string;TenPhongBan:string;T
   MaPhongBanCha:number|null;DangHoatDong:boolean;SoNguoiDung:number;SoPhongBanCon:number};
 function DepartmentAdministration({token}:{token:string}){
   const [items,setItems]=useState<ManagedDepartment[]>([]);
+  const [departmentPage,setDepartmentPage]=useState(1);
   const [draft,setDraft]=useState<Record<number,{name:string;order:number;parent:number}>>({});
   const [code,setCode]=useState('');const [name,setName]=useState('');const [order,setOrder]=useState(50);
   const [parent,setParent]=useState(0);const [busy,setBusy]=useState(false);
@@ -759,7 +783,7 @@ function DepartmentAdministration({token}:{token:string}){
       <button className="primary small" type="submit" disabled={busy||!code||!name}><Plus size={15}/> Thêm phòng</button>
     </form>
     <h4 className="admin-department-section-title">Danh sách phòng ban <span>({items.length})</span></h4>
-    <div className="admin-department-list">{items.map(d=>{const edit=draft[d.MaPhongBan]??
+    <div className="admin-department-list">{pageRows(items,departmentPage).map(d=>{const edit=draft[d.MaPhongBan]??
       {name:d.TenPhongBan,order:d.ThuTuHienThi,parent:d.MaPhongBanCha??0};
       return <div className="admin-department-row" key={d.MaPhongBan}>
         <div className="admin-department-description"><strong>{d.TenPhongBan}</strong>
@@ -782,11 +806,13 @@ function DepartmentAdministration({token}:{token:string}){
               dangHoatDong:!d.DangHoatDong})}),d.DangHoatDong?'Đã ngừng hoạt động phòng.':'Đã mở lại phòng.')}>{d.DangHoatDong?'Ngừng':'Mở lại'}</button>
         </div>
       </div>;})}</div>
+    <Pagination total={items.length} page={departmentPage} onPage={setDepartmentPage}/>
     {error&&<div className="form-error">{error}</div>}{message&&<p className="success-note">{message}</p>}
   </section>;
 }
 function UserAdministration({token,username,canManagePermissions}:{token:string;username:string;canManagePermissions:boolean}){
   const [users,setUsers]=useState<AdminUser[]>([]);
+  const [userPage,setUserPage]=useState(1);
   const [departments,setDepartments]=useState<AdminOption[]>([]);
   const [roles,setRoles]=useState<AdminOption[]>([]);
   const [name,setName]=useState('');const [login,setLogin]=useState('');
@@ -870,9 +896,10 @@ function UserAdministration({token,username,canManagePermissions}:{token:string;
       {permissionUser!==null&&users.find(u=>u.MaNguoiDung===permissionUser)&&<UserPermissionSettings
         key={permissionUser} token={token} user={users.find(u=>u.MaNguoiDung===permissionUser)!}
         onClose={()=>setPermissionUser(null)}/>}
-      {orderedUsers.map((u,index)=>{const edit=edits[u.MaNguoiDung]??{department:u.MaPhongBan,role:u.MaVaiTro,positionName:u.ChucVu};
+      {pageRows(orderedUsers,userPage).map((u,index)=>{const edit=edits[u.MaNguoiDung]??{department:u.MaPhongBan,role:u.MaVaiTro,positionName:u.ChucVu};
+        const globalIndex=(Math.min(userPage,Math.max(1,Math.ceil(orderedUsers.length/PAGE_SIZE)))-1)*PAGE_SIZE+index;
         const own=u.TenDangNhap===username;const protectedUser=u.MaVaiTro==='AGENCY_ADMIN'||own;
-        const groupStart=index===0||orderedUsers[index-1].MaPhongBan!==u.MaPhongBan;
+        const groupStart=index===0||orderedUsers[globalIndex-1].MaPhongBan!==u.MaPhongBan;
         const count=groupStart?orderedUsers.filter(item=>item.MaPhongBan===u.MaPhongBan).length:0;
         return <Fragment key={u.MaNguoiDung}>
         {groupStart&&<div className="admin-department-header"><strong>{u.TenPhongBan||'Chưa phân phòng ban'}</strong><span>{count} tài khoản</span></div>}
@@ -896,6 +923,7 @@ function UserAdministration({token,username,canManagePermissions}:{token:string;
             <button className="secondary small" disabled={busy||protectedUser}
               onClick={()=>action(()=>requestApi(`/admin/users/${u.MaNguoiDung}/status`,token,{method:'PUT',body:JSON.stringify({dangHoatDong:!u.DangHoatDong})}),u.DangHoatDong?'Đã khóa tài khoản.':'Đã mở tài khoản.')}>{u.DangHoatDong?'Khóa':'Mở khóa'}</button></div>
         </div></Fragment>;})}
+      <Pagination total={orderedUsers.length} page={userPage} onPage={setUserPage}/>
     </section>
     {error&&<div className="form-error">{error}</div>}{message&&<p className="success-note">{message}</p>}
   </div>;
@@ -1110,6 +1138,15 @@ export default function App() {
   const [notifications,setNotifications]=useState<MonitorNotification[]>([]);
   const [notificationOpen,setNotificationOpen]=useState(false);
   const [monitorFilter,setMonitorFilter]=useState('ALL');
+  const [documentPage,setDocumentPage]=useState(1);
+  const [taskPage,setTaskPage]=useState(1);
+  const [journeyPage,setJourneyPage]=useState(1);
+  const [deliveryPage,setDeliveryPage]=useState(1);
+  const [monitorPage,setMonitorPage]=useState(1);
+  const [reportPage,setReportPage]=useState(1);
+  const [notificationPage,setNotificationPage]=useState(1);
+  useEffect(()=>{setDocumentPage(1);setTaskPage(1);setJourneyPage(1);setDeliveryPage(1);
+    setMonitorPage(1);setReportPage(1);},[page,query,filter]);
   useEffect(()=>{if(DEMO||!token)return;
     requestApi('/monitor/notifications',token).then(setNotifications).catch(()=>{});
     requestApi('/monitor/tasks',token).then(setMonitorTasks).catch(()=>{});
@@ -1129,6 +1166,7 @@ export default function App() {
     const term=query.toLocaleLowerCase('vi-VN').trim();
     return !term || `${d.code} ${d.title} ${d.number||''}`.toLocaleLowerCase('vi-VN').includes(term);
   }).sort((a,b)=>new Date(b.createdAt).getTime()-new Date(a.createdAt).getTime()),[visibleDocs,page,filter,query]);
+  const monitoredRows=monitorTasks.filter(t=>monitorFilter==='ALL'||t.TinhTrangHan===monitorFilter);
   const currentDoc=visibleDocs.find(d=>d.id===selected);
   const fetchTimeline=async(d:VanBan)=>{
     const resp=await requestApi(`/documents/${d.id}/timeline`,token);
@@ -1187,8 +1225,18 @@ export default function App() {
   };
 
   const refresh=async(authToken:string)=>{
+    // Backend phân trang 20 bản/lượt; nạp tiếp để phân trang 15 bản trên giao diện không bỏ sót bản cũ.
+    const fetchDocuments=async()=>{
+      const all:Record<string,unknown>[]=[];
+      for(let pageNumber=1;pageNumber<=100;pageNumber++){
+        const batch=await requestApi(`/documents?trang=${pageNumber}`,authToken) as Record<string,unknown>[];
+        all.push(...batch);
+        if(batch.length<20)return all;
+      }
+      throw new Error('Danh sách vượt giới hạn tải 2.000 văn bản. Cần bổ sung phân trang máy chủ cho dữ liệu lớn.');
+    };
     const [documents,tasks,incoming]=await Promise.all([
-      requestApi('/documents',authToken),
+      fetchDocuments(),
       requestApi('/workqueue',authToken).catch(()=>[]),
       requestApi('/incoming',authToken).catch(()=>[])
     ]);
@@ -1328,14 +1376,15 @@ export default function App() {
       </select><ChevronDown size={15}/></div>}</div>
     </div>
     <div className="table-scroll"><table className="doc-table"><thead><tr><th>VĂN BẢN</th><th>NGÀY TẠO</th><th>TRẠNG THÁI</th><th>NGƯỜI XỬ LÝ</th><th></th></tr></thead>
-      <tbody>{filtered.map(d=><tr key={d.id} onClick={()=>openDoc(d)} tabIndex={0} onKeyDown={e=>{if(e.key==='Enter')openDoc(d);}}>
+      <tbody>{pageRows(filtered,documentPage).map(d=><tr key={d.id} onClick={()=>openDoc(d)} tabIndex={0} onKeyDown={e=>{if(e.key==='Enter')openDoc(d);}}>
         <td><div className="doc-cell"><div className={`file-icon ${d.type==='DEN'?'incoming':''}`}><FileText size={21}/></div>
           <div className="doc-title"><strong>{d.title}</strong><span>{d.number||d.code}{d.urgency!=='THUONG'&&<b className="urgent-label">Khẩn</b>}</span></div></div></td>
         <td className="muted-cell">{formatDate(d.createdAt).slice(0,10)}</td><td><Status status={d.status} small/></td>
         <td><div className="assignee"><span className="tiny-avatar">{initials(d.assignee)}</span><span>{d.assignee}</span></div></td>
         <td><button className="row-open" aria-label={`Xem ${d.title}`}><ChevronRight size={18}/></button></td></tr>)}</tbody></table>
       {filtered.length===0&&<EmptyView icon={Files} title="Chưa có văn bản" message="Không tìm thấy văn bản phù hợp với bộ lọc hiện tại."/>}</div>
-    <div className="table-footer"><span>Hiển thị {filtered.length} kết quả</span><span>Chọn một văn bản để xem hành trình <ArrowUpRight size={14}/></span></div>
+    <div className="table-footer"><span>Tổng {filtered.length} kết quả</span><span>Chọn một văn bản để xem hành trình <ArrowUpRight size={14}/></span></div>
+    <Pagination total={filtered.length} page={documentPage} onPage={setDocumentPage}/>
   </div>;
 
   return <div className="app-shell">
@@ -1364,11 +1413,12 @@ export default function App() {
         <button className="icon-button notification-button" title="Thông báo" onClick={()=>setNotificationOpen(x=>!x)}>
           <Bell size={20}/>{notifications.some(n=>!n.DaDoc)&&<span className="notification-dot"/>}</button>
         {notificationOpen&&<div className="notification-popup"><h3>Thông báo của tôi</h3>
-          {notifications.slice(0,30).map(n=><button key={`${n.LoaiThongBao}-${n.MaThamChieu}`}
+          {pageRows(notifications,notificationPage).map(n=><button key={`${n.LoaiThongBao}-${n.MaThamChieu}`}
             className={n.DaDoc?'read':''} onClick={()=>void markNotification(n)}>
             <strong>{n.TieuDe}</strong><small>{n.MaNoiBo} · {formatDate(n.ThoiDiem)} · {n.MucDo==='QUA_HAN'?'Quá hạn':n.MucDo==='SAP_DEN_HAN'?'Sắp đến hạn':''}</small>
           </button>)}
           {notifications.length===0&&<p>Chưa có thông báo.</p>}
+          <Pagination total={notifications.length} page={notificationPage} onPage={setNotificationPage}/>
         </div>}
         <div className="header-divider"/><button className="user-button" onClick={()=>setProfileMenu(!profileMenu)}>
           <span className="avatar">{initials(actor.name)}</span><span className="user-name"><strong>{actor.name}</strong><small>{actor.position}</small></span><ChevronDown size={16}/></button>
@@ -1425,10 +1475,11 @@ export default function App() {
       {page==='hanh-trinh'&&<><div className="page-intro compact"><div><div className="overline">MINH BẠCH QUY TRÌNH</div><h1>Hành trình văn bản</h1>
         <p>Xem từng bước chuyển, người đang giữ việc và trạng thái tiếp nhận của từng cơ quan.</p></div></div>
         <div className="journey-workspace"><div className="panel journey-list"><div className="panel-head"><div><h3>Chọn văn bản</h3><p>{filtered.length} văn bản</p></div></div>
-          {filtered.map(d=><button className={`journey-list-item ${journeyPick===d.id?'chosen':''}`} key={d.id} onClick={()=>pickJourney(d)}>
+          {pageRows(filtered,journeyPage).map(d=><button className={`journey-list-item ${journeyPick===d.id?'chosen':''}`} key={d.id} onClick={()=>pickJourney(d)}>
             <div className="journey-list-top"><small>{d.number||d.code}</small><Status status={d.status} small/></div>
             <strong>{d.title}</strong><div><span><CalendarDays size={14}/>{formatDate(d.createdAt).slice(0,10)}</span><span>{d.to.length} nơi nhận</span></div>
-          </button>)}{filtered.length===0&&<EmptyView title="Chưa có dữ liệu" message="Hãy tạo một văn bản mới để bắt đầu." icon={Route}/>}</div>
+          </button>)}{filtered.length===0&&<EmptyView title="Chưa có dữ liệu" message="Hãy tạo một văn bản mới để bắt đầu." icon={Route}/>}
+          <Pagination total={filtered.length} page={journeyPage} onPage={setJourneyPage}/></div>
           <div className="panel journey-preview">{filtered.find(d=>d.id===journeyPick)||filtered[0]?(()=>{
             const chosen=filtered.find(d=>d.id===journeyPick)||filtered[0];
             const d=!DEMO&&journeyPick===chosen.id&&journeyTimeline?{...chosen,events:journeyTimeline.events,transfers:journeyTimeline.transfers}:chosen;
@@ -1443,12 +1494,13 @@ export default function App() {
 
       {page==='cong-viec'&&<><div className="page-intro compact"><div><div className="overline">HÀNG ĐỢI CÔNG VIỆC</div><h1>Việc cần xử lý</h1><p>Các văn bản đang chờ bạn kiểm tra, phê duyệt hoặc giải quyết.</p></div></div>
         <div className="panel tasks-panel"><div className="panel-head"><h3>Công việc của tôi</h3><span className="count-bubble">{DEMO?visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length:workqueue.length}</span></div>
-          {DEMO?visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).map(d=><button className="task-row" key={d.id} onClick={()=>openDoc(d)}><div className="task-icon"><FileClock size={20}/></div><div><strong>{d.title}</strong><small>{d.code} · Hạn {formatDate(d.dueAt)}</small></div><Status status={d.status}/><ChevronRight size={18}/></button>)
-           :workqueue.map(t=>{const progress=monitorTasks.find(m=>m.MaTacVu===String(field(t,'MaTacVu')));
+          {DEMO?pageRows(visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')),taskPage).map(d=><button className="task-row" key={d.id} onClick={()=>openDoc(d)}><div className="task-icon"><FileClock size={20}/></div><div><strong>{d.title}</strong><small>{d.code} · Hạn {formatDate(d.dueAt)}</small></div><Status status={d.status}/><ChevronRight size={18}/></button>)
+           :pageRows(workqueue,taskPage).map(t=>{const progress=monitorTasks.find(m=>m.MaTacVu===String(field(t,'MaTacVu')));
              return <button className="task-row" key={String(field(t,'MaTacVu'))} onClick={()=>void openWorkqueueDocument(t)}><div className="task-icon"><FileClock size={20}/></div><div><strong>{String(field(t,'TieuDe'))}</strong>
                <small>{String(field(t,'MaNoiBo'))} · {String(field(t,'Buoc'))} · Hạn: {formatDate(progress?.HanXuLy??undefined)}</small></div>
                <span className={`deadline-pill ${progress?.TinhTrangHan??''}`}>{deadlineLabels[progress?.TinhTrangHan??'']??'Đang xử lý'}</span><ChevronRight size={18}/></button>;})}
-          {DEMO&&visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length===0&&<EmptyView title="Không có việc đang chờ" message="Các công việc được giao sẽ hiện tại đây." icon={CheckCheck}/>}</div></>}
+          {DEMO&&visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length===0&&<EmptyView title="Không có việc đang chờ" message="Các công việc được giao sẽ hiện tại đây." icon={CheckCheck}/>}
+          <Pagination total={DEMO?visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length:workqueue.length} page={taskPage} onPage={setTaskPage}/></div></>}
 
       {page==='giao-nhan'&&<><div className="page-intro compact"><div><div className="overline">CHUYỂN PHÁT LIÊN CƠ QUAN</div><h1>Giao nhận văn bản</h1><p>Biên nhận được theo dõi độc lập tại mỗi cơ quan nhận.</p></div></div>
         {!DEMO&&<LiveDeliveries token={token} direction="out" onUpdated={updateAfterOperation}/>}
@@ -1456,9 +1508,10 @@ export default function App() {
         <div className="mini-stats"><span><Network size={17}/>Tổng lượt: <strong>{totalTransfer}</strong></span><span><CheckCircle2 size={17}/>Đã nhận: <strong>{visibleDocs.flatMap(d=>d.transfers).filter(t=>t.status==='DA_TIEP_NHAN').length}</strong></span>
           <span><Clock3 size={17}/>Chờ nhận: <strong>{visibleDocs.flatMap(d=>d.transfers).filter(t=>t.status!=='DA_TIEP_NHAN').length}</strong></span></div>
         <div className="panel deliveries-panel"><div className="panel-head"><h3>Danh sách giao nhận</h3></div>
-          {visibleDocs.filter(d=>d.transfers.length>0).map(d=><div className="delivery-group" key={d.id}><div className="delivery-group-head"><div><small>{d.number||d.code}</small><h4>{d.title}</h4></div>
+          {pageRows(visibleDocs.filter(d=>d.transfers.length>0),deliveryPage).map(d=><div className="delivery-group" key={d.id}><div className="delivery-group-head"><div><small>{d.number||d.code}</small><h4>{d.title}</h4></div>
             <button className="secondary small" onClick={()=>openDoc(d)}>Hành trình <ArrowUpRight size={16}/></button></div><TransferCards doc={d}/></div>)}
-          {totalTransfer===0&&<EmptyView title="Chưa có lượt chuyển phát" message="Chỉ bản đã ký và phát hành mới được giao đến cơ quan nhận." icon={Network}/>}</div></>}</>}
+          {totalTransfer===0&&<EmptyView title="Chưa có lượt chuyển phát" message="Chỉ bản đã ký và phát hành mới được giao đến cơ quan nhận." icon={Network}/>}
+          <Pagination total={visibleDocs.filter(d=>d.transfers.length>0).length} page={deliveryPage} onPage={setDeliveryPage}/></div></>}</>}
 
       {page==='ho-so'&&<><div className="page-intro compact"><div><div className="overline">LƯU TRỮ ĐIỆN TỬ</div><h1>Hồ sơ lưu trữ</h1><p>Tập hợp văn bản và quản lý vị trí lưu hồ sơ giấy.</p></div></div>
         <EmptyView title="Chưa có hồ sơ" message="Chức năng tạo, liên kết và đóng hồ sơ sẽ được triển khai trong giai đoạn tiếp theo." icon={Archive}/></>}
@@ -1474,25 +1527,27 @@ export default function App() {
         ].map(([label,value])=><div className="panel report-item" key={label}><span>{label}</span><strong>{value}</strong><div className="report-bar"/></div>)}</div>
         <div className="panel monitor-panel"><div className="panel-head"><h3>Hiệu suất theo người và phòng ban</h3></div>
           <div className="monitor-table-wrap"><table><thead><tr><th>Phòng ban</th><th>Người xử lý</th><th>Tổng</th><th>Đã xử lý</th><th>Quá hạn</th><th>Đúng hạn</th><th>Trung bình</th></tr></thead>
-            <tbody>{monitorReports.map((r,i)=><tr key={`${r.NguoiXuLy}-${i}`}><td>{r.PhongBan}</td><td>{r.NguoiXuLy}</td><td>{r.Tong}</td><td>{r.DaXuLy}</td><td>{r.QuaHan}</td>
+            <tbody>{pageRows(monitorReports,reportPage).map((r,i)=><tr key={`${r.NguoiXuLy}-${i}`}><td>{r.PhongBan}</td><td>{r.NguoiXuLy}</td><td>{r.Tong}</td><td>{r.DaXuLy}</td><td>{r.QuaHan}</td>
               <td>{r.DungHan}</td><td>{r.PhutTrungBinh==null?'—':`${(r.PhutTrungBinh/60).toFixed(1)} giờ`}</td></tr>)}</tbody></table></div>
           {monitorReports.length===0&&<p className="fine-note">Chưa có tác vụ để thống kê.</p>}
+          <Pagination total={monitorReports.length} page={reportPage} onPage={setReportPage}/>
         </div></>}
 
       {page==='giam-sat'&&<><div className="page-intro compact"><div><div className="overline">GIÁM SÁT · 0.6.5</div><h1>Theo dõi tiến độ</h1>
           <p>Chỉ xem bước xử lý, người phụ trách, thời gian chờ và hạn; không tự động chuyển bước.</p></div></div>
         <div className="panel monitor-panel"><div className="panel-head"><h3>Tác vụ trong phạm vi giám sát</h3>
-          <label>Lọc hạn xử lý <select value={monitorFilter} onChange={e=>setMonitorFilter(e.target.value)}>
+          <label>Lọc hạn xử lý <select value={monitorFilter} onChange={e=>{setMonitorFilter(e.target.value);setMonitorPage(1);}}>
             <option value="ALL">Tất cả</option>{Object.entries(deadlineLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}
           </select></label></div>
           <div className="monitor-table-wrap"><table><thead><tr><th>Văn bản</th><th>Bước</th><th>Người xử lý</th><th>Giao lúc</th><th>Hạn</th><th>Đã chờ</th><th>Tình trạng</th></tr></thead>
-            <tbody>{monitorTasks.filter(t=>monitorFilter==='ALL'||t.TinhTrangHan===monitorFilter).map(t=><tr key={t.MaTacVu}>
+            <tbody>{pageRows(monitoredRows,monitorPage).map(t=><tr key={t.MaTacVu}>
               <td><button className="monitor-link" onClick={()=>void openMonitoredDocument(t.MaVanBan)}>{t.TieuDe}<small>{t.MaNoiBo}</small></button></td>
               <td>{t.Buoc}</td><td>{t.NguoiPhuTrach}<small>{t.TenPhongBan??'Chưa phân phòng'}</small>{t.NguoiKyThay&&<small>Ký thay: {t.NguoiKyThay}</small>}</td>
               <td>{formatDate(t.ThoiDiemTao)}</td><td>{formatDate(t.HanXuLy??undefined)}</td>
               <td>{Math.max(0,t.SoPhutXuLy/60).toFixed(1)} giờ</td><td><span className={`deadline-pill ${t.TinhTrangHan}`}>{deadlineLabels[t.TinhTrangHan]??t.TinhTrangHan}</span></td>
             </tr>)}</tbody></table></div>
           {monitorTasks.length===0&&<p className="fine-note">Chưa có tác vụ để giám sát.</p>}
+          <Pagination total={monitoredRows.length} page={monitorPage} onPage={setMonitorPage}/>
         </div></>}
 
       {page==='quan-tri'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ CƠ QUAN · 0.6.1</div><h1>Quản trị tài khoản</h1>
