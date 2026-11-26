@@ -3,6 +3,7 @@ using Dapper;
 public sealed record GiaoXuLyVanBanDen(int MaPhongChuTri,int[] MaPhongPhoiHop,string? ChiDao,DateTime? HanXuLy);
 public sealed record BaoCaoVanBanDen(string NoiDung);
 public sealed record KetThucVanBanDen(string KetQuaTongHop);
+public sealed record GiaoCaNhanVanBanDen(int MaPhongBan,int MaNguoiChuTri,int[] MaNguoiPhoiHop,string? GhiChu);
 
 public static class DieuHanhVanBanDenEndpoints
 {
@@ -103,6 +104,103 @@ public static class DieuHanhVanBanDenEndpoints
             tx.Commit();return Results.Ok(new{message="Đã giao phòng chủ trì và các phòng phối hợp."});
         });
 
+        group.MapGet("/{id:guid}/people",async(Guid id,HttpContext http,PhanQuyen permissions,Database db)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor?.MaCoQuan is null)return Results.Unauthorized();
+            using var cn=db.Open();
+            var leader=await CoVaiTro(cn,actor.MaNguoiDung,actor.MaCoQuan.Value,"LANH_DAO","PHO_LANH_DAO");
+            var clerk=await CoVaiTro(cn,actor.MaNguoiDung,actor.MaCoQuan.Value,"VAN_THU");
+            var manager=await CoVaiTro(cn,actor.MaNguoiDung,actor.MaCoQuan.Value,"TRUONG_PHONG","PHO_PHONG");
+            var allowed=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.PhanCongVanBanDen p
+                JOIN dbo.NguoiDung n ON n.MaNguoiDung=@user
+                WHERE p.MaVanBanDen=@id AND p.MaCoQuan=@agency AND
+                    (@leader=1 OR @clerk=1 OR p.MaPhongChuTri=n.MaPhongBan OR
+                        EXISTS(SELECT 1 FROM dbo.PhoiHopVanBanDen h WHERE h.MaVanBanDen=@id AND h.MaPhongBan=n.MaPhongBan))",
+                new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,leader,clerk});
+            if(allowed==0)return Results.NotFound();
+            var rooms=await cn.QueryAsync(@"
+                SELECT p.MaPhongChuTri AS MaPhongBan,ph.TenPhongBan,CAST(1 AS BIT) AS LaPhongChuTri
+                FROM dbo.PhanCongVanBanDen p JOIN dbo.PhongBan ph ON ph.MaPhongBan=p.MaPhongChuTri
+                WHERE p.MaVanBanDen=@id AND p.MaCoQuan=@agency
+                UNION ALL
+                SELECT h.MaPhongBan,ph.TenPhongBan,CAST(0 AS BIT)
+                FROM dbo.PhoiHopVanBanDen h JOIN dbo.PhongBan ph ON ph.MaPhongBan=h.MaPhongBan
+                JOIN dbo.PhanCongVanBanDen p ON p.MaVanBanDen=h.MaVanBanDen
+                WHERE p.MaVanBanDen=@id AND p.MaCoQuan=@agency",
+                new{id,agency=actor.MaCoQuan});
+            var employees=await cn.QueryAsync(@"
+                SELECT n.MaNguoiDung,n.MaPhongBan,n.HoTen
+                FROM dbo.NguoiDung n
+                WHERE n.MaCoQuan=@agency AND n.DangHoatDong=1
+                  AND (EXISTS(SELECT 1 FROM dbo.PhanCongVanBanDen p
+                        WHERE p.MaVanBanDen=@id AND p.MaCoQuan=@agency AND p.MaPhongChuTri=n.MaPhongBan)
+                       OR EXISTS(SELECT 1 FROM dbo.PhoiHopVanBanDen h
+                         JOIN dbo.PhanCongVanBanDen p ON p.MaVanBanDen=h.MaVanBanDen
+                         WHERE h.MaVanBanDen=@id AND p.MaCoQuan=@agency AND h.MaPhongBan=n.MaPhongBan))
+                  AND (@leader=1 OR (@manager=1 AND n.MaPhongBan=(SELECT MaPhongBan FROM dbo.NguoiDung WHERE MaNguoiDung=@user)))
+                ORDER BY n.HoTen",
+                new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,leader,manager});
+            var assigned=await cn.QueryAsync(@"
+                SELECT a.MaPhongBan,a.MaNguoiChuTri,n.HoTen AS TenNguoiChuTri,a.GhiChu,
+                  (SELECT STRING_AGG(helper.HoTen,N', ') FROM dbo.NguoiPhoiHopVanBanDen x
+                   JOIN dbo.NguoiDung helper ON helper.MaNguoiDung=x.MaNguoiDung
+                   WHERE x.MaVanBanDen=a.MaVanBanDen AND x.MaPhongBan=a.MaPhongBan) AS TenNguoiPhoiHop
+                FROM dbo.PhanCongCaNhanVanBanDen a JOIN dbo.NguoiDung n ON n.MaNguoiDung=a.MaNguoiChuTri
+                WHERE a.MaVanBanDen=@id",new{id});
+            var actorDepartment=await cn.ExecuteScalarAsync<int?>(@"SELECT MaPhongBan FROM dbo.NguoiDung WHERE MaNguoiDung=@user",
+                new{user=actor.MaNguoiDung});
+            return Results.Ok(new{rooms,employees,assigned,actorDepartment,canAssign=manager});
+        });
+
+        group.MapPost("/{id:guid}/people",async(Guid id,GiaoCaNhanVanBanDen body,HttpContext http,
+            PhanQuyen permissions,Database db)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor?.MaCoQuan is null)return Results.Unauthorized();
+            if(body.MaPhongBan<=0 || body.MaNguoiChuTri<=0 || body.MaNguoiPhoiHop is null ||
+               body.MaNguoiPhoiHop.Length>50 || body.MaNguoiPhoiHop.Contains(body.MaNguoiChuTri) ||
+               body.MaNguoiPhoiHop.Distinct().Count()!=body.MaNguoiPhoiHop.Length || body.GhiChu?.Length>2000)
+                return Results.BadRequest(new{message="Cá nhân chủ trì hoặc phối hợp không hợp lệ."});
+            using var cn=db.Open();await cn.OpenAsync();
+            if(!await CoVaiTro(cn,actor.MaNguoiDung,actor.MaCoQuan.Value,"TRUONG_PHONG","PHO_PHONG"))return Results.Forbid();
+            using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
+            var eligible=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.PhanCongVanBanDen p WITH(UPDLOCK,HOLDLOCK)
+                JOIN dbo.NguoiDung manager ON manager.MaNguoiDung=@user
+                WHERE p.MaVanBanDen=@id AND p.MaCoQuan=@agency AND p.TrangThai='DANG_XU_LY'
+                  AND manager.MaCoQuan=@agency AND manager.MaPhongBan=@room
+                  AND (p.MaPhongChuTri=@room OR EXISTS(SELECT 1 FROM dbo.PhoiHopVanBanDen h
+                      WHERE h.MaVanBanDen=@id AND h.MaPhongBan=@room))",
+                new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,room=body.MaPhongBan},tx);
+            if(eligible==0){tx.Rollback();return Results.Forbid();}
+            var hasReport=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.KetQuaPhongVanBanDen
+                WHERE MaVanBanDen=@id AND MaPhongBan=@room",
+                new{id,room=body.MaPhongBan},tx);
+            if(hasReport>0){tx.Rollback();return Results.Conflict(new{message="Phòng đã báo cáo; không thể đổi người chịu trách nhiệm."});}
+            var ids=body.MaNguoiPhoiHop.Append(body.MaNguoiChuTri).ToArray();
+            var valid=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.NguoiDung
+                WHERE MaNguoiDung IN @ids AND MaCoQuan=@agency AND MaPhongBan=@room AND DangHoatDong=1",
+                new{ids,agency=actor.MaCoQuan,room=body.MaPhongBan},tx);
+            if(valid!=ids.Length){tx.Rollback();return Results.BadRequest(new{message="Người được giao phải đang hoạt động và thuộc đúng phòng."});}
+            await cn.ExecuteAsync(@"
+                DELETE FROM dbo.NguoiPhoiHopVanBanDen WHERE MaVanBanDen=@id AND MaPhongBan=@room;
+                UPDATE dbo.PhanCongCaNhanVanBanDen
+                  SET MaNguoiChuTri=@principal,MaNguoiGiao=@user,GhiChu=@note,ThoiDiemGiao=SYSUTCDATETIME()
+                  WHERE MaVanBanDen=@id AND MaPhongBan=@room;
+                IF @@ROWCOUNT=0 INSERT dbo.PhanCongCaNhanVanBanDen
+                    (MaVanBanDen,MaPhongBan,MaNguoiChuTri,MaNguoiGiao,GhiChu)
+                    VALUES(@id,@room,@principal,@user,@note)",
+                new{id,room=body.MaPhongBan,principal=body.MaNguoiChuTri,
+                    user=actor.MaNguoiDung,note=body.GhiChu?.Trim()},tx);
+            foreach(var helper in body.MaNguoiPhoiHop)
+                await cn.ExecuteAsync(@"
+                    INSERT dbo.NguoiPhoiHopVanBanDen(MaVanBanDen,MaPhongBan,MaNguoiDung)
+                    VALUES(@id,@room,@helper)",new{id,room=body.MaPhongBan,helper},tx);
+            tx.Commit();return Results.Ok(new{message="Đã giao cá nhân chịu trách nhiệm thực hiện."});
+        });
+
         group.MapPost("/{id:guid}/report",async(Guid id,BaoCaoVanBanDen body,HttpContext http,
             PhanQuyen permissions,Database db)=>{
             var actor=await permissions.NguoiHienTai(http);
@@ -112,13 +210,10 @@ public static class DieuHanhVanBanDenEndpoints
             using var cn=db.Open();await cn.OpenAsync();
             using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
             var department=await cn.QuerySingleOrDefaultAsync<int?>(@"
-                SELECT n.MaPhongBan FROM dbo.NguoiDung n
-                JOIN dbo.PhanCongVanBanDen p WITH(UPDLOCK,HOLDLOCK) ON p.MaVanBanDen=@id
-                WHERE n.MaNguoiDung=@user AND n.MaCoQuan=p.MaCoQuan AND p.MaCoQuan=@agency
-                  AND p.TrangThai='DANG_XU_LY' AND
-                    (p.MaPhongChuTri=n.MaPhongBan OR EXISTS(
-                        SELECT 1 FROM dbo.PhoiHopVanBanDen h
-                        WHERE h.MaVanBanDen=@id AND h.MaPhongBan=n.MaPhongBan))",
+                SELECT a.MaPhongBan FROM dbo.PhanCongCaNhanVanBanDen a
+                JOIN dbo.PhanCongVanBanDen p WITH(UPDLOCK,HOLDLOCK) ON p.MaVanBanDen=a.MaVanBanDen
+                WHERE a.MaVanBanDen=@id AND a.MaNguoiChuTri=@user AND p.MaCoQuan=@agency
+                  AND p.TrangThai='DANG_XU_LY'",
                 new{id,user=actor.MaNguoiDung,agency=actor.MaCoQuan},tx);
             if(department is null){tx.Rollback();return Results.Forbid();}
             await cn.ExecuteAsync(@"
