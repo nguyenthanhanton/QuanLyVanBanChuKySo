@@ -47,8 +47,8 @@ public static class QuanTriNguoiDungEndpoints
             if(error!=null)return error;
             using var cn=db.Open();
             var departments=await cn.QueryAsync(@"
-                SELECT MaPhongBan,TenPhongBan,MaDinhDanh FROM dbo.PhongBan
-                WHERE MaCoQuan=@agency AND DangHoatDong=1 ORDER BY TenPhongBan",
+                SELECT MaPhongBan,TenPhongBan,MaDinhDanh,ThuTuHienThi,MaPhongBanCha FROM dbo.PhongBan
+                WHERE MaCoQuan=@agency AND DangHoatDong=1 ORDER BY ThuTuHienThi,TenPhongBan",
                 new{agency=actor!.MaCoQuan});
             var roles=await cn.QueryAsync(@"
                 SELECT MaDinhDanh,TenVaiTro FROM dbo.VaiTro
