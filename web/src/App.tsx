@@ -15,6 +15,7 @@ import { formatDate, stageLabel, transferLabel } from './types';
 import SignaturePlacement, { type SignaturePosition } from './SignaturePlacement';
 import HoSoPage from './HoSoPage';
 import DieuHanhVanBanDenPanel from './DieuHanhVanBanDenPanel';
+import ChiTietVanBanDen from './ChiTietVanBanDen';
 
 const DEMO = import.meta.env.VITE_DEMO_MODE !== 'false';
 const APP_TITLE = 'Văn thư số';
@@ -98,11 +99,21 @@ function initials(name: string) {
 }
 
 async function requestApi(path:string, token:string, init?:RequestInit) {
-  const res=await fetch('/api/v1'+path,{...init,headers:{ ...(init?.body instanceof FormData ? {} : {'Content-Type':'application/json'}),
-    Authorization:`Bearer ${token}`,...init?.headers }});
+  let res:Response;
+  try{
+    res=await fetch('/api/v1'+path,{...init,headers:{ ...(init?.body instanceof FormData ? {} : {'Content-Type':'application/json'}),
+      Authorization:`Bearer ${token}`,...init?.headers }});
+  }catch{
+    throw new Error('Không thể kết nối máy chủ. Hãy kiểm tra backend và kết nối mạng.');
+  }
   if(!res.ok) {
-    const problem=await res.json().catch(()=>({message:'Không thể kết nối máy chủ.'}));
-    throw new Error(problem.message ?? `Máy chủ trả lỗi ${res.status}`);
+    const problem=await res.json().catch(()=>({}));
+    const fallback:Record<number,string>={
+      400:'Yêu cầu không hợp lệ.',401:'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.',
+      403:'Bạn không có quyền truy cập chức năng này.',404:'Không tìm thấy văn bản hoặc tài nguyên được yêu cầu.',
+      409:'Dữ liệu đã thay đổi hoặc có xung đột.',500:'Máy chủ gặp lỗi xử lý yêu cầu.'};
+    throw new Error(typeof problem.message==='string'&&problem.message.trim()?problem.message:
+      fallback[res.status]??`Máy chủ trả lỗi ${res.status}.`);
   }
   return res.json();
 }
@@ -1215,6 +1226,7 @@ export default function App() {
   },[page,token,journeyPick,visibleDocs]);
   const openDoc=async(d:VanBan)=>{
     setSelected(d.id);setRemoteTimeline(undefined);
+    if(d.type==='DEN')return;
     if(!DEMO&&token){
       try{setRemoteTimeline(await fetchTimeline(d));}catch(err){setError((err as Error).message);}
     }
@@ -1605,7 +1617,9 @@ export default function App() {
           <div className="panel">Chức năng ủy quyền ký chỉ sử dụng khi kết nối API thật.</div>}</>}
     </div>
     </main>
-    {currentDoc&&<DocumentDetails key={currentDoc.id} doc={currentDoc} onClose={()=>setSelected(null)} onAction={action} allowed={actor}
+    {currentDoc&&currentDoc.type==='DEN'&&!DEMO&&<ChiTietVanBanDen key={currentDoc.id} doc={currentDoc} token={token}
+      onClose={()=>setSelected(null)} onProcess={id=>{setSelected(null);setIncomingFocus(id);setPage('van-ban-den');}}/>}
+    {currentDoc&&(currentDoc.type!=='DEN'||DEMO)&&<DocumentDetails key={currentDoc.id} doc={currentDoc} onClose={()=>setSelected(null)} onAction={action} allowed={actor}
       canDecide={DEMO?currentDoc.assignee===actor.name:workqueue.some(t=>String(field(t,'MaVanBan'))===currentDoc.id)}
       taskStep={String(field(workqueue.find(t=>String(field(t,'MaVanBan'))===currentDoc.id)??{},'Buoc')??'')}
       liveTimeline={remoteTimeline} token={token} onUpdated={updateAfterOperation}/>}
