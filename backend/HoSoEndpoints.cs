@@ -195,7 +195,9 @@ public static class HoSoEndpoints
             using var cn=db.Open();await cn.OpenAsync();using var tx=cn.BeginTransaction();
             var count=await cn.ExecuteAsync(@"UPDATE h SET DaDong=@DaDong,ThoiDiemCapNhat=SYSUTCDATETIME()
                 FROM dbo.HoSoLuuTru h WHERE h.MaHoSo=@id AND h.MaCoQuan=@agency
-                  AND h.DaDong<>@DaDong AND "+DuocSua,
+                  AND h.DaDong<>@DaDong
+                  AND NOT EXISTS(SELECT 1 FROM dbo.LuotNopLuuHoSo l WHERE l.MaHoSo=h.MaHoSo
+                    AND l.TrangThai IN ('CHO_TIEP_NHAN','DA_TIEP_NHAN')) AND "+DuocSua,
                 new{id,body.DaDong,agency=actor!.MaCoQuan,user=actor.MaNguoiDung,admin},tx);
             if(count!=1)return Results.Conflict(new{message="Không có quyền hoặc hồ sơ đã ở trạng thái này."});
             await Ghi(cn,tx,id,actor,body.DaDong?"DONG":"MO_LAI",null,
