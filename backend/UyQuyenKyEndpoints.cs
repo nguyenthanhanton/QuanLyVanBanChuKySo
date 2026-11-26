@@ -150,6 +150,13 @@ public static class UyQuyenKyEndpoints
                   AND t.Buoc IN ('KIEM_TRA_NOI_DUNG','PHE_DUYET_LANH_DAO')",
                 new{taskId=body.MaTacVu,agency=actor.MaCoQuan},tx);
             if(task==null){tx.Rollback();return Results.Conflict(new{message="Tác vụ không còn đang chờ ký."});}
+            var signedStage=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.ChuKySo s
+                WHERE s.MaVanBan=@id AND s.MaCoQuan=@agency AND s.SoPhienBan=@version
+                  AND s.LoaiChuKy=@signature",
+                new{id=task.MaVanBan,agency=actor.MaCoQuan,version=task.PhienBanDuocDuyet,
+                    signature=task.Buoc=="KIEM_TRA_NOI_DUNG"?"KY_NHAY":"KY_LANH_DAO"},tx);
+            if(signedStage>0){tx.Rollback();return Results.Conflict(new{message="Bước này đã có chữ ký PDF; không thể cấp ủy quyền sau khi ký."});}
             if(!await DuDieuKien(cn,tx,actor.MaCoQuan.Value,task,body.MaNguoiDuocUyQuyen)){
                 tx.Rollback();return Results.BadRequest(new{message="Người ký thay không đủ chức vụ, không cùng phòng hoặc đã ký văn bản."});
             }
