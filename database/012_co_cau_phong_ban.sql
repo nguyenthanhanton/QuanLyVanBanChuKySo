@@ -18,12 +18,12 @@ IF COL_LENGTH('dbo.PhongBan','MaPhongBanCha') IS NULL
 
 -- Chỉ phòng cùng cơ quan được làm phòng cấp trên.
 IF NOT EXISTS(SELECT 1 FROM sys.foreign_keys WHERE name='FK_PhongBan_ChaCungCoQuan')
-    ALTER TABLE dbo.PhongBan WITH CHECK ADD CONSTRAINT FK_PhongBan_ChaCungCoQuan
-      FOREIGN KEY(MaCoQuan,MaPhongBanCha) REFERENCES dbo.PhongBan(MaCoQuan,MaPhongBan);
+    EXEC sys.sp_executesql N'ALTER TABLE dbo.PhongBan WITH CHECK ADD CONSTRAINT FK_PhongBan_ChaCungCoQuan
+      FOREIGN KEY(MaCoQuan,MaPhongBanCha) REFERENCES dbo.PhongBan(MaCoQuan,MaPhongBan)';
 
 IF NOT EXISTS(SELECT 1 FROM sys.check_constraints WHERE name='CK_PhongBan_KhongTuTrucThuoc')
-    ALTER TABLE dbo.PhongBan ADD CONSTRAINT CK_PhongBan_KhongTuTrucThuoc
-      CHECK(MaPhongBanCha IS NULL OR MaPhongBanCha<>MaPhongBan);
+    EXEC sys.sp_executesql N'ALTER TABLE dbo.PhongBan ADD CONSTRAINT CK_PhongBan_KhongTuTrucThuoc
+      CHECK(MaPhongBanCha IS NULL OR MaPhongBanCha<>MaPhongBan)';
 
 EXEC sys.sp_executesql N'UPDATE dbo.PhongBan SET ThuTuHienThi=CASE MaDinhDanh
     WHEN ''LANH_DAO'' THEN 10 WHEN ''VAN_PHONG'' THEN 20 WHEN ''VAN_THU'' THEN 90 ELSE 50 END
