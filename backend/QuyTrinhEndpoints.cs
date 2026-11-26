@@ -56,6 +56,13 @@ public static class QuyTrinhEndpoints
                   AND v.TrangThai IN ('NHAP','TRA_SUA')",
                 new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung});
             if(department==null)return Results.NotFound();
+            var leaderAuthorRoles=(await cn.QueryAsync<string>(@"
+                SELECT r.MaDinhDanh FROM dbo.NguoiDungVaiTro uv JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
+                WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency
+                  AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO')",
+                new{user=actor.MaNguoiDung,agency=actor.MaCoQuan})).ToHashSet();
+            var leaderAuthor=leaderAuthorRoles.Count>0;
+            var leaderRequiredRole=leaderAuthorRoles.Contains("LANH_DAO")?"PHO_LANH_DAO":null;
             var office=department is "VAN_THU" or "VAN_PHONG";
             var role=office?"TRUONG_VAN_PHONG":"TRUONG_PHONG";
             var deputyRole=office?"PHO_VAN_PHONG":"PHO_PHONG";
@@ -76,8 +83,9 @@ public static class QuyTrinhEndpoints
                 LEFT JOIN dbo.PhongBan p ON p.MaPhongBan=u.MaPhongBan
                 WHERE u.MaCoQuan=@agency AND u.DangHoatDong=1 AND u.MaNguoiDung<>@user
                   AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO')
-                ORDER BY u.HoTen",new{agency=actor.MaCoQuan,user=actor.MaNguoiDung});
-            var reviewers=await cn.QueryAsync(@"
+                  AND (@leaderRequiredRole IS NULL OR r.MaDinhDanh=@leaderRequiredRole)
+                ORDER BY u.HoTen",new{agency=actor.MaCoQuan,user=actor.MaNguoiDung,leaderRequiredRole});
+            var reviewers=leaderAuthor?Enumerable.Empty<dynamic>():await cn.QueryAsync(@"
                 SELECT DISTINCT u.MaNguoiDung,u.HoTen,u.ChucVu,p.TenPhongBan,
                        r.TenVaiTro AS VaiTroKy
                 FROM dbo.NguoiDung u JOIN dbo.NguoiDungVaiTro uv ON uv.MaNguoiDung=u.MaNguoiDung
@@ -90,7 +98,8 @@ public static class QuyTrinhEndpoints
                 ORDER BY u.HoTen",new{agency=actor.MaCoQuan,user=actor.MaNguoiDung,
                     role,deputyRole,requiredRole,office,department});
             return Results.Ok(new{nguoiKyNhay=reviewers,nguoiKyLanhDao=leaders,
-                vaiTroKyNhay=requiredRole??role,phongBanNguoiSoan=department});
+                vaiTroKyNhay=requiredRole??role,phongBanNguoiSoan=department,
+                boQuaKyNhay=leaderAuthor,soBuocKy=leaderAuthor?3:4});
         }).RequireAuthorization();
 
         app.MapGet("/api/v1/workqueue",async(HttpContext http,PhanQuyen permission,Database db)=>{
@@ -152,6 +161,13 @@ public static class QuyTrinhEndpoints
                   ON p.MaPhongBan=v.MaPhongBan AND p.MaCoQuan=v.MaCoQuan
                 WHERE v.MaVanBan=@id AND v.MaCoQuan=@agency",new{id,agency=actor.MaCoQuan},tx);
             if(department==null){tx.Rollback();return Results.Conflict(new{message="Người soạn chưa được phân phòng ban."});}
+            var leaderAuthorRoles=(await cn.QueryAsync<string>(@"
+                SELECT r.MaDinhDanh FROM dbo.NguoiDungVaiTro uv JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
+                WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency
+                  AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO')",
+                new{user=actor.MaNguoiDung,agency=actor.MaCoQuan},tx)).ToHashSet();
+            var leaderAuthor=leaderAuthorRoles.Count>0;
+            var leaderRequiredRole=leaderAuthorRoles.Contains("LANH_DAO")?"PHO_LANH_DAO":null;
             var office=department is "VAN_THU" or "VAN_PHONG";
             var role=office?"TRUONG_VAN_PHONG":"TRUONG_PHONG";
             var deputyRole=office?"PHO_VAN_PHONG":"PHO_PHONG";
@@ -163,35 +179,42 @@ public static class QuyTrinhEndpoints
                 new{user=actor.MaNguoiDung,agency=actor.MaCoQuan,role,deputyRole},tx)).ToHashSet();
             var requiredRole=authorRoles.Contains(role)?deputyRole:null;
             var authorized=await cn.ExecuteScalarAsync<int>(@"
-                SELECT COUNT(DISTINCT CASE WHEN u.MaNguoiDung=@reviewer AND r.MaDinhDanh IN (@role,@deputyRole)
+                SELECT COUNT(DISTINCT CASE WHEN @leaderAuthor=0 AND u.MaNguoiDung=@reviewer AND r.MaDinhDanh IN (@role,@deputyRole)
                     AND (@requiredRole IS NULL OR r.MaDinhDanh=@requiredRole)
                     AND (@office=1 OR p.MaDinhDanh=@department) THEN 1
-                    WHEN u.MaNguoiDung=@leader AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO') THEN 2 END)
+                    WHEN u.MaNguoiDung=@leader AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO')
+                    AND (@leaderRequiredRole IS NULL OR r.MaDinhDanh=@leaderRequiredRole) THEN 2 END)
                 FROM dbo.NguoiDung u JOIN dbo.NguoiDungVaiTro uv ON uv.MaNguoiDung=u.MaNguoiDung
                   AND uv.MaCoQuan=u.MaCoQuan JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
                 LEFT JOIN dbo.PhongBan p ON p.MaPhongBan=u.MaPhongBan
                 WHERE u.MaCoQuan=@agency AND u.DangHoatDong=1
                   AND u.MaNguoiDung<>@user AND u.MaNguoiDung IN (@reviewer,@leader)",
                 new{agency=actor.MaCoQuan,reviewer=body.MaNguoiKyNhay,leader=body.MaNguoiKyLanhDao,
-                    user=actor.MaNguoiDung,role,deputyRole,requiredRole,office,department},tx);
-            if(body.MaNguoiKyNhay==body.MaNguoiKyLanhDao || authorized!=2){
+                    user=actor.MaNguoiDung,role,deputyRole,requiredRole,office,department,
+                    leaderAuthor,leaderRequiredRole},tx);
+            if((!leaderAuthor && body.MaNguoiKyNhay==body.MaNguoiKyLanhDao) ||
+               (leaderAuthor && body.MaNguoiKyNhay!=0) || authorized!=(leaderAuthor?1:2)){
                 tx.Rollback();return Results.BadRequest(new{message="Người ký được chọn không đúng vai trò hoặc phòng ban."});
             }
             await cn.ExecuteAsync(@"
-                UPDATE dbo.VanBan SET MaNguoiKyNhay=@reviewer,MaNguoiKyLanhDao=@leader,SoBuocKy=4
+                UPDATE dbo.VanBan SET MaNguoiKyNhay=@reviewer,MaNguoiKyLanhDao=@leader,SoBuocKy=@total
                 WHERE MaVanBan=@id AND MaCoQuan=@agency",
-                new{id,agency=actor.MaCoQuan,reviewer=body.MaNguoiKyNhay,leader=body.MaNguoiKyLanhDao},tx);
-            var approver=body.MaNguoiKyNhay;
+                new{id,agency=actor.MaCoQuan,reviewer=leaderAuthor?(int?)null:body.MaNguoiKyNhay,
+                    leader=body.MaNguoiKyLanhDao,total=leaderAuthor?3:4},tx);
+            var approver=leaderAuthor?body.MaNguoiKyLanhDao:body.MaNguoiKyNhay;
+            var firstStep=leaderAuthor?"PHE_DUYET_LANH_DAO":"KIEM_TRA_NOI_DUNG";
             var taskId=Guid.NewGuid();
             await cn.ExecuteAsync(@"
                 INSERT dbo.TacVuXuLy(MaTacVu,MaVanBan,MaCoQuan,MaNguoiDuocGiao,Buoc,HanXuLy,PhienBanDuocDuyet)
-                VALUES(@taskId,@id,@agency,@approver,'KIEM_TRA_NOI_DUNG',DATEADD(HOUR,48,SYSUTCDATETIME()),@ver)",
-                new{taskId,id,agency=actor.MaCoQuan,approver,ver=doc.PhienBanHienTai},tx);
+                VALUES(@taskId,@id,@agency,@approver,@firstStep,DATEADD(HOUR,48,SYSUTCDATETIME()),@ver)",
+                new{taskId,id,agency=actor.MaCoQuan,approver,firstStep,ver=doc.PhienBanHienTai},tx);
             await cn.ExecuteAsync("UPDATE dbo.VanBan SET TrangThai='CHO_DUYET',ThoiDiemCapNhat=SYSUTCDATETIME() WHERE MaVanBan=@id",new{id},tx);
             await cn.ExecuteAsync(@"
                 INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,HanhDong,MoTa,TrangThaiTruoc,TrangThaiSau,SoPhienBan)
-                VALUES(@id,@agency,@user,'TRINH_DUYET',N'Trình trưởng phòng kiểm tra nội dung',@before,'CHO_DUYET',@ver)",
-                new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,before=doc.TrangThai,ver=doc.PhienBanHienTai},tx);
+                VALUES(@id,@agency,@user,'TRINH_DUYET',@description,@before,'CHO_DUYET',@ver)",
+                new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,before=doc.TrangThai,
+                    description=leaderAuthor?"Lãnh đạo soạn: trình lãnh đạo được chọn ký duyệt, bỏ qua trưởng phòng":
+                        "Trình trưởng/phó phòng được chọn kiểm tra nội dung",ver=doc.PhienBanHienTai},tx);
             var result=System.Text.Json.JsonSerializer.Serialize(new{maVanBan=id,maTacVu=taskId,trangThai="CHO_DUYET"});
             await GhiBienNhan(cn,tx,actor.MaCoQuan.Value,actor.MaNguoiDung,body.MaYeuCau,"TRINH_DUYET",result);
             tx.Commit();return Results.Content(result,"application/json");
@@ -226,7 +249,7 @@ public static class QuyTrinhEndpoints
                 var expected=task.Buoc switch{
                     "KIEM_TRA_NOI_DUNG"=>(Order:2,Type:"KY_NHAY"),
                     "KIEM_TRA_THE_THUC"=>(Order:3,Type:"KY_THE_THUC"),
-                    "PHE_DUYET_LANH_DAO"=>(Order:document.SoBuocKy==4?3:4,Type:"KY_LANH_DAO"),
+                    "PHE_DUYET_LANH_DAO"=>(Order:document.SoBuocKy-1,Type:"KY_LANH_DAO"),
                     _=>(Order:0,Type:"")
                 };
                 if(expected.Order==0){tx.Rollback();return Results.Conflict(new{message="Bước phê duyệt không hợp lệ."});}

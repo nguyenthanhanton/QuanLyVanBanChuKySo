@@ -387,11 +387,13 @@ public static class KySoEndpoints
             }
             var doc=await LayVanBan(cn,tx,id,actor.MaCoQuan.Value);
             if(doc==null){tx.Rollback();return Results.NotFound();}
-            if(doc.SoBuocKy==4){
-                if(request.LoaiChuKy=="KY_THE_THUC"){
-                    tx.Rollback();return Results.Conflict(new{message="Quy trình 4 vị trí không có bước ký thể thức riêng."});
+            if(doc.SoBuocKy is 3 or 4){
+                if(request.LoaiChuKy=="KY_THE_THUC" ||
+                   (doc.SoBuocKy==3 && request.LoaiChuKy=="KY_NHAY")){
+                    tx.Rollback();return Results.Conflict(new{message="Quy trình này không có bước ký nháy/thể thức riêng."});
                 }
-                if(request.LoaiChuKy=="KY_LANH_DAO")stage=(3,"LANH_DAO","PHE_DUYET_LANH_DAO");
+                if(request.LoaiChuKy=="KY_LANH_DAO")
+                    stage=(doc.SoBuocKy-1,"LANH_DAO","PHE_DUYET_LANH_DAO");
                 if((request.LoaiChuKy=="KY_NHAY" && doc.MaNguoiKyNhay!=actor.MaNguoiDung) ||
                    (request.LoaiChuKy=="KY_LANH_DAO" && doc.MaNguoiKyLanhDao!=actor.MaNguoiDung)){
                     tx.Rollback();return Results.Forbid();
@@ -405,7 +407,7 @@ public static class KySoEndpoints
                 authorizedRole=authorizedRole || await CoVaiTro(cn,tx,actor,"PHO_PHONG") ||
                     await CoVaiTro(cn,tx,actor,"TRUONG_VAN_PHONG") ||
                     await CoVaiTro(cn,tx,actor,"PHO_VAN_PHONG");
-            if(doc.SoBuocKy==4 && request.LoaiChuKy=="KY_LANH_DAO")
+            if(doc.SoBuocKy is 3 or 4 && request.LoaiChuKy=="KY_LANH_DAO")
                 authorizedRole=authorizedRole || await CoVaiTro(cn,tx,actor,"PHO_LANH_DAO");
             if(!authorizedRole){
                 tx.Rollback();return Results.Forbid();

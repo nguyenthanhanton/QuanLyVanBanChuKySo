@@ -371,7 +371,7 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
           token={token} onClose={()=>setSignedPreview(false)}/>}
       </div>}
       {(doc.status==='NHAP'||doc.status==='TRA_SUA')&&isAllowed(actor,'signing.sign')&&<>
-        <p className="fine-note">Bước 1: Người tạo ký PDF chính trước khi trình duyệt. Sau khi chọn người ký nháy và lãnh đạo, văn bản sẽ dùng quy trình 4 vị trí. Nếu sửa tệp, cần ký lại.</p>
+        <p className="fine-note">Bước 1: Người tạo ký PDF chính trước khi trình duyệt. Khi chọn người ký, hệ thống tự xác định 3 vị trí nếu lãnh đạo soạn (không qua trưởng phòng), hoặc 4 vị trí với người soạn thuộc phòng ban. Nếu sửa tệp, cần ký lại.</p>
         <button className="primary small" disabled={busy||signatures.length>0}
           onClick={()=>operation('draft-sign')}>{signatures.length>0?'Đã ký PDF người soạn':'Ký số PDF người soạn (1)'}</button>
       </>}
@@ -554,6 +554,7 @@ type SigningChoice={maNguoiKyNhay:number;maNguoiKyLanhDao:number};
 type SignerOption={MaNguoiDung:number;HoTen:string;ChucVu:string;TenPhongBan:string;VaiTroKy:string};
 function SignerPicker({doc,token,onClose,onSubmit}:{doc:VanBan;token:string;onClose:()=>void;
   onSubmit:(choice:SigningChoice)=>void}){
+  const [leaderDraft,setLeaderDraft]=useState(false);
   const [reviewers,setReviewers]=useState<SignerOption[]>([]);
   const [leaders,setLeaders]=useState<SignerOption[]>([]);
   const [reviewer,setReviewer]=useState(0);
@@ -575,29 +576,31 @@ function SignerPicker({doc,token,onClose,onSubmit}:{doc:VanBan;token:string;onCl
       const a=convert(first),b=convert(second);
       setReviewers(a);setLeaders(b);setReviewer(a[0]?.MaNguoiDung??0);setLeader(b[0]?.MaNguoiDung??0);
       setRole(String(field(data,'vaiTroKyNhay')??''));
+      setLeaderDraft(Boolean(field(data,'boQuaKyNhay')));
     }).catch(e=>{if(active)setError((e as Error).message);}).finally(()=>{if(active)setLoading(false);});
     return ()=>{active=false;};
   },[doc.id,token]);
   return <div className="preview-backdrop" onClick={onClose}><div className="signer-picker" onClick={e=>e.stopPropagation()}>
     <h3>Chọn người được phép ký văn bản</h3>
-    <p className="fine-note">Người soạn đã ký bước 1. Chọn trưởng hoặc phó trưởng đơn vị được phân quyền ký nháy (bước 2); chọn lãnh đạo trưởng hoặc cấp phó được phân quyền ký chính thức (bước 3). Văn thư ký số cơ quan cuối cùng (bước 4). Danh sách được máy chủ lọc theo cơ quan, phòng ban và vai trò.</p>
+    <p className="fine-note">{leaderDraft?'Lãnh đạo soạn: chọn lãnh đạo khác ký duyệt ở bước 2, sau đó văn thư ký cơ quan ở bước 3. Không trình qua trưởng phòng.':
+      'Người soạn đã ký bước 1. Chọn trưởng/phó trưởng đơn vị ký nháy (bước 2), lãnh đạo ký duyệt (bước 3), văn thư ký cơ quan (bước 4).'}</p>
     {loading?<p>Đang tải danh sách người ký...</p>:<>
-      <label>{role==='TRUONG_VAN_PHONG'?'Trưởng văn phòng ký nháy':
+      {!leaderDraft&&<label>{role==='TRUONG_VAN_PHONG'?'Trưởng văn phòng ký nháy':
         role==='PHO_VAN_PHONG'?'Phó trưởng văn phòng ký nháy':
         role==='PHO_PHONG'?'Phó trưởng phòng ký nháy':'Trưởng phòng / người được ủy quyền ký nháy'}
         <select value={reviewer} onChange={e=>setReviewer(Number(e.target.value))}>
           {reviewers.map(p=><option key={p.MaNguoiDung} value={p.MaNguoiDung}>{p.HoTen} — {p.VaiTroKy} — {p.TenPhongBan}</option>)}
-        </select></label>
+        </select></label>}
       <label>Lãnh đạo trưởng / cấp phó ký chính thức
         <select value={leader} onChange={e=>setLeader(Number(e.target.value))}>
           {leaders.map(p=><option key={p.MaNguoiDung} value={p.MaNguoiDung}>{p.HoTen} — {p.VaiTroKy}</option>)}
         </select></label>
-      {(!reviewers.length||!leaders.length)&&<div className="form-error">Chưa có người ký phù hợp và khác người soạn. Nếu trưởng phòng soạn, cần có cấp phó được gán quyền; nếu phó trưởng phòng soạn, có thể chọn trưởng hoặc cấp phó khác cùng phòng. Hãy nhờ quản trị viên bổ nhiệm đúng vai trò trước khi trình duyệt.</div>}
+      {((!leaderDraft&&!reviewers.length)||!leaders.length)&&<div className="form-error">Chưa có người ký phù hợp và khác người soạn. Cần bổ nhiệm người ký đúng vai trò; lãnh đạo cấp trưởng soạn thì chỉ chọn các cấp phó, lãnh đạo cấp phó soạn có thể chọn cấp trưởng hoặc cấp phó khác.</div>}
     </>}
     {error&&<div className="form-error">{error}</div>}
     <div className="signature-step-actions"><button className="secondary" onClick={onClose}>Hủy</button>
-      <button className="primary" disabled={loading||!!error||!reviewer||!leader||reviewer===leader}
-        onClick={()=>onSubmit({maNguoiKyNhay:reviewer,maNguoiKyLanhDao:leader})}>Xác nhận và trình duyệt</button></div>
+      <button className="primary" disabled={loading||!!error||(!leaderDraft&&!reviewer)||!leader||(!leaderDraft&&reviewer===leader)}
+        onClick={()=>onSubmit({maNguoiKyNhay:leaderDraft?0:reviewer,maNguoiKyLanhDao:leader})}>Xác nhận và trình duyệt</button></div>
   </div></div>;
 }
 

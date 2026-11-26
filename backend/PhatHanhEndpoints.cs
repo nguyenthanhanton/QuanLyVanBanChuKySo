@@ -33,7 +33,7 @@ public static class PhatHanhEndpoints
         var hash=await DichVuKyPdf.Bam(pdf.DuongDanLuuTru);
         if(hash!=pdf.MaBamSha256)return Results.Conflict(new{message="PDF phát hành bị thay đổi."});
         var signatures=signer.XacMinh(pdf.DuongDanLuuTru);
-        if(signatures.Count is not (4 or 5) || signatures.Any(s=>!s.ToanVenMatMa) ||
+        if(signatures.Count is not (3 or 4 or 5) || signatures.Any(s=>!s.ToanVenMatMa) ||
            !signatures[^1].BaoPhuToanBoBanHienTai)
             return Results.Conflict(new{message="Chữ ký PDF phát hành không hợp lệ về mật mã."});
         return null;
