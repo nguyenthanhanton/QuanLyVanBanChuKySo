@@ -167,7 +167,7 @@ public static class KySoEndpoints
             using var cn=db.Open();
             var image=await cn.QuerySingleOrDefaultAsync<byte[]>(@"
                 SELECT HinhAnhChuKy FROM dbo.ChungThuKy WHERE MaChungThu=@id AND MaCoQuan=@agency
-                AND DangHoatDong=1 AND (MaNguoiSoHuu=@user OR
+                AND (MaNguoiSoHuu=@user OR
                   (MaNguoiSoHuu IS NULL AND EXISTS(SELECT 1 FROM dbo.NguoiDungVaiTro uv
                     JOIN dbo.VaiTro v ON v.MaVaiTro=uv.MaVaiTro
                     WHERE uv.MaCoQuan=@agency AND uv.MaNguoiDung=@user
