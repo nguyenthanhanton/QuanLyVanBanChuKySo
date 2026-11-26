@@ -1173,6 +1173,7 @@ export default function App() {
   const monitoredRows=monitorTasks.filter(t=>monitorFilter==='ALL'||t.TinhTrangHan===monitorFilter);
   const currentDoc=visibleDocs.find(d=>d.id===selected);
   const fetchTimeline=async(d:VanBan)=>{
+    if(d.type==='DEN')return {events:[] as SuKien[],transfers:[] as ChuyenPhat[]};
     const resp=await requestApi(`/documents/${d.id}/timeline`,token);
     const transferRows:ChuyenPhat[]=(resp.deliveries||[]).map((t:Record<string,unknown>)=>({
       id:String(field(t,'MaLuotChuyen')),agency:String(field(t,'CoQuanNhan')),contact:'Văn thư',
@@ -1228,7 +1229,7 @@ export default function App() {
     }
   };
 
-  const refresh=async(authToken:string)=>{
+  const refresh=async(authToken:string,capabilities=actor?.capabilities??[])=>{
     // Backend phân trang 20 bản/lượt; nạp tiếp để phân trang 15 bản trên giao diện không bỏ sót bản cũ.
     const fetchDocuments=async()=>{
       const all:Record<string,unknown>[]=[];
@@ -1242,7 +1243,8 @@ export default function App() {
     const [documents,tasks,incoming]=await Promise.all([
       fetchDocuments(),
       requestApi('/workqueue',authToken).catch(()=>[]),
-      requestApi('/incoming',authToken).catch(()=>[])
+      capabilities.includes('incoming.manage')
+        ?requestApi('/incoming',authToken).catch(()=>[]):Promise.resolve([])
     ]);
     const inbound=(incoming as Record<string,unknown>[]).map(d=>({
       id:String(field(d,'MaVanBanDen')),code:`DEN-${field(d,'SoDen')??'CHO_DANG_KY'}`,
@@ -1297,7 +1299,7 @@ export default function App() {
       const agencies=await requestApi('/agencies/recipients',body.accessToken) as Record<string,unknown>[];
       setAgencyOptions(agencies.map(a=>({value:String(field(a,'MaCoQuan')),label:String(field(a,'TenCoQuan'))})));
     }catch{setAgencyOptions([]);}
-    if(caps.includes('documents.read'))await refresh(body.accessToken);
+    if(caps.includes('documents.read'))await refresh(body.accessToken,caps);
   };
 
   const logout=()=>{setActor(null);setToken('');setSelected(null);setQuery('');setProfileMenu(false);setError('');};
