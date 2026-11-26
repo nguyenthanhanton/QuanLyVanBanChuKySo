@@ -91,8 +91,13 @@ public static class GiamSatEndpoints
                 GROUP BY p.TenPhongBan,u.HoTen ORDER BY p.TenPhongBan,u.HoTen",
                 new{agency=actor!.MaCoQuan})).ToArray();
             var data=new List<string[]>{new[]{"Phòng ban","Người xử lý","Tổng tác vụ","Đang chờ","Đã xử lý","Quá hạn"}};
-            foreach(var row in rows)data.Add(new[]{(string)row.PhongBan,(string)row.NguoiXuLy,
-                Convert.ToString(row.Tong)!,Convert.ToString(row.DangCho)!,Convert.ToString(row.DaXuLy)!,Convert.ToString(row.QuaHan)!});
+            foreach(var row in rows)data.Add(new string[]{
+                Convert.ToString((object)row.PhongBan)??"",
+                Convert.ToString((object)row.NguoiXuLy)??"",
+                Convert.ToString((object)row.Tong)??"0",
+                Convert.ToString((object)row.DangCho)??"0",
+                Convert.ToString((object)row.DaXuLy)??"0",
+                Convert.ToString((object)row.QuaHan)??"0"});
             return Results.File(TaoXlsx(data),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "bao-cao-giam-sat-065.xlsx");
         }).RequireAuthorization();
