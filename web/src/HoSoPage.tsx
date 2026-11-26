@@ -11,8 +11,9 @@ type Dossier={MaHoSo:string;MaHoSoNoiBo:string;TenHoSo:string;LoaiHoSo:string;Na
   DaDong:boolean;NguoiTao:string;MaNguoiTao:number;SoVanBan:number;ThoiDiemTao:string};
 type Attached={MaVanBan:string;MaNoiBo:string;TieuDe:string;SoPhatHanh:number|null;
   KyHieu:string|null;ThoiDiemThem:string;NguoiThem:string};
+type IncomingAttached={MaVanBanDen:string;SoDen:number;Nam:number;TieuDe:string;TrangThai:string;ThoiDiemThem:string;NguoiThem:string};
 type History={MaLichSu:number;HanhDong:string;MoTa:string;ThoiDiem:string;NguoiThucHien:string};
-type Details={HoSo:Dossier;VanBan:Attached[];LichSu:History[]};
+type Details={HoSo:Dossier;VanBan:Attached[];VanBanDen:IncomingAttached[];LichSu:History[]};
 const BLANK={MaHoSoNoiBo:'',TenHoSo:'',LoaiHoSo:'Văn bản hành chính',NamHoSo:new Date().getFullYear(),
   MaPhongBan:'',SoNamBaoQuan:'',GhiChu:''};
 type FormState=typeof BLANK;
@@ -51,19 +52,37 @@ export default function HoSoPage({token,documents,onOpen}:{token:string;document
   const [status,setStatus]=useState('ALL');
   const [docSearch,setDocSearch]=useState('');
   const [chosenDoc,setChosenDoc]=useState('');
+  const [incomingAvailable,setIncomingAvailable]=useState<IncomingAttached[]>([]);
+  const [chosenIncoming,setChosenIncoming]=useState('');
+  const [incomingSearch,setIncomingSearch]=useState('');
+  const [incomingPdf,setIncomingPdf]=useState('');
   const [page,setPage]=useState(1);
   const [historyPage,setHistoryPage]=useState(1);
   const [docPage,setDocPage]=useState(1);
+  const [incomingPage,setIncomingPage]=useState(1);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
 
   const load=async()=>{
-    const [rows,depts]=await Promise.all([api('/',token),api('/departments',token)]);
+    const [rows,depts,incoming]=await Promise.all([api('/',token),api('/departments',token),api('/incoming-available',token)]);
     setDossiers(rows as Dossier[]);setDepartments(depts as Department[]);
+    setIncomingAvailable(incoming as IncomingAttached[]);
   };
   const loadDetails=async(id:string)=>{const value=await api(`/${id}`,token) as Details;setDetails(value);};
   useEffect(()=>{if(!token)return;load().catch(e=>setError((e as Error).message));},[token]);
+  useEffect(()=>()=>{if(incomingPdf)URL.revokeObjectURL(incomingPdf);},[incomingPdf]);
+  const openIncomingPdf=async(documentId:string)=>{
+    if(!selected)return;
+    setError('');
+    try{
+      const response=await fetch(`/api/v1/dossiers/${selected}/incoming-documents/${documentId}/pdf`,{
+        headers:{Authorization:`Bearer ${token}`}});
+      if(!response.ok){const error=await response.json().catch(()=>({}));
+        throw new Error(error.message??`Không mở được PDF (${response.status}).`);}
+      setIncomingPdf(URL.createObjectURL(await response.blob()));
+    }catch(err){setError((err as Error).message);}
+  };
   const perform=async(action:()=>Promise<void>,message:string)=>{
     setBusy(true);setError('');setNotice('');
     try{await action();await load();if(selected)await loadDetails(selected);setNotice(message);}
@@ -96,6 +115,8 @@ export default function HoSoPage({token,documents,onOpen}:{token:string;document
   const selectDossier=async(id:string)=>{
     setSelected(id);setDetails(null);setError('');setNotice('');setEditing(false);setCreating(false);
     setDocPage(1);setHistoryPage(1);setChosenDoc('');setDocSearch('');
+    setIncomingPage(1);
+    setChosenIncoming('');setIncomingSearch('');
     try{await loadDetails(id);}catch(e){setError((e as Error).message);}
   };
 
@@ -149,7 +170,7 @@ export default function HoSoPage({token,documents,onOpen}:{token:string;document
           <span>Bảo quản: <b>{details.HoSo.SoNamBaoQuan?`${details.HoSo.SoNamBaoQuan} năm`:'Vĩnh viễn'}</b></span>
           <span>Trạng thái: <b>{details.HoSo.DaDong?'Đã đóng':'Đang mở'}</b></span></div>
         {details.HoSo.GhiChu&&<p className="fine-note">{details.HoSo.GhiChu}</p>}
-        <h3>Văn bản trong hồ sơ ({details.VanBan.length})</h3>
+        <h3>Văn bản trong hồ sơ ({details.VanBan.length+(details.VanBanDen?.length??0)})</h3>
         {!details.HoSo.DaDong&&<div className="archive-add"><input placeholder="Tìm văn bản đã phát hành" value={docSearch}
             onChange={e=>{setDocSearch(e.target.value);setChosenDoc('');}}/>
           <select value={chosenDoc} onChange={e=>setChosenDoc(e.target.value)}><option value="">Chọn văn bản để đưa vào hồ sơ</option>
@@ -157,6 +178,21 @@ export default function HoSoPage({token,documents,onOpen}:{token:string;document
           <button className="primary" disabled={!chosenDoc||busy} onClick={()=>perform(async()=>{
             await api(`/${selected}/documents`,token,{method:'POST',body:JSON.stringify({MaVanBan:chosenDoc})});setChosenDoc('');
           },'Đã thêm văn bản vào hồ sơ.')}>Thêm văn bản</button></div>}
+        {!details.HoSo.DaDong&&<div className="archive-add">
+          <input placeholder="Tìm văn bản đến đã hoàn thành" value={incomingSearch}
+            onChange={e=>{setIncomingSearch(e.target.value);setChosenIncoming('');}}/>
+          <select value={chosenIncoming} onChange={e=>setChosenIncoming(e.target.value)}>
+            <option value="">Chọn văn bản đến để lưu</option>
+            {incomingAvailable.filter(d=>!details.VanBanDen?.some(v=>v.MaVanBanDen===d.MaVanBanDen)
+              &&`${d.SoDen}/${d.Nam} ${d.TieuDe}`.toLocaleLowerCase('vi-VN')
+                .includes(incomingSearch.toLocaleLowerCase('vi-VN'))).slice(0,100)
+              .map(d=><option key={d.MaVanBanDen} value={d.MaVanBanDen}>Đến {d.SoDen}/{d.Nam} — {d.TieuDe}</option>)}
+          </select>
+          <button className="primary" disabled={!chosenIncoming||busy} onClick={()=>perform(async()=>{
+            await api(`/${selected}/incoming-documents`,token,{method:'POST',
+              body:JSON.stringify({MaVanBan:chosenIncoming})});setChosenIncoming('');
+          },'Đã thêm văn bản đến vào hồ sơ.')}>Thêm văn bản đến</button>
+        </div>}
         <div className="archive-docs">{details.VanBan.slice((docPage-1)*15,docPage*15).map(d=><div className="archive-document" key={d.MaVanBan}>
           <FileText size={19}/><div><strong>{d.TieuDe}</strong><small>{d.MaNoiBo} · Thêm bởi {d.NguoiThem} lúc {formatDate(d.ThoiDiemThem)}</small></div>
           <button className="secondary small" onClick={()=>{const doc=documents.find(v=>v.id===d.MaVanBan);if(doc)onOpen(doc);else setError('Văn bản không nằm trong danh sách được phép xem.');}}>Xem</button>
@@ -164,7 +200,19 @@ export default function HoSoPage({token,documents,onOpen}:{token:string;document
             if(!window.confirm('Gỡ văn bản khỏi hồ sơ? Văn bản gốc sẽ không bị xóa.'))return;
             void perform(async()=>{await api(`/${selected}/documents/${d.MaVanBan}`,token,{method:'DELETE'});},'Đã gỡ liên kết văn bản.');
           }}>Gỡ</button>}</div>)}</div>
-        {details.VanBan.length===0&&<p className="archive-empty">Chưa có văn bản. Chỉ thêm văn bản thường đã phát hành.</p>}
+        <h4>Văn bản đến đã lưu ({details.VanBanDen?.length??0})</h4>
+        <div className="archive-docs">{(details.VanBanDen??[]).slice((incomingPage-1)*15,incomingPage*15).map(d=><div className="archive-document" key={d.MaVanBanDen}>
+          <FileText size={19}/><div><strong>{d.TieuDe}</strong>
+            <small>Số đến {d.SoDen}/{d.Nam} · {d.TrangThai} · Thêm bởi {d.NguoiThem}</small></div>
+          <button className="secondary small" onClick={()=>openIncomingPdf(d.MaVanBanDen)}>Xem PDF đã ký</button>
+          {!details.HoSo.DaDong&&<button className="secondary small" disabled={busy} onClick={()=>{
+            if(!window.confirm('Gỡ văn bản đến khỏi hồ sơ? Bản gốc vẫn được giữ nguyên.'))return;
+            void perform(async()=>{await api(`/${selected}/incoming-documents/${d.MaVanBanDen}`,token,{method:'DELETE'});},
+              'Đã gỡ văn bản đến khỏi hồ sơ.');
+          }}>Gỡ</button>}
+        </div>)}</div>
+        <Pages count={details.VanBanDen?.length??0} page={incomingPage} change={setIncomingPage}/>
+        {details.VanBan.length===0&&!(details.VanBanDen??[]).length&&<p className="archive-empty">Chưa có văn bản trong hồ sơ.</p>}
         <Pages count={details.VanBan.length} page={docPage} change={setDocPage}/>
         <h3>Lịch sử hồ sơ ({details.LichSu.length})</h3><div className="archive-history">{details.LichSu.slice((historyPage-1)*15,historyPage*15).map(e=><div key={e.MaLichSu}>
           <strong>{e.HanhDong.replaceAll('_',' ')}</strong><span>{e.MoTa}</span>
@@ -174,6 +222,12 @@ export default function HoSoPage({token,documents,onOpen}:{token:string;document
     <NopLuuPanel token={token} selected={selected} closed={details?.HoSo.DaDong} documents={documents} onOpen={onOpen}
       onChanged={async()=>{await load();if(selected)await loadDetails(selected);}}/>
     <LuuTruNangCaoPanel token={token}/>
+    {incomingPdf&&<div className="incoming-work-preview-overlay" role="dialog" aria-modal="true" aria-label="Văn bản đến trong hồ sơ">
+      <div className="incoming-work-preview"><div className="incoming-work-preview-head"><strong>Văn bản đến đã ký số</strong>
+        <button className="secondary small" onClick={()=>setIncomingPdf('')}>Đóng</button></div>
+        <iframe src={incomingPdf} title="PDF văn bản đến trong hồ sơ"/>
+      </div>
+    </div>}
     <p className="fine-note">Hồ sơ chỉ lưu liên kết; không sao chép, sửa hay xóa PDF đã ký. Quyền truy cập văn bản tiếp tục được kiểm tra ở máy chủ.</p>
   </div>;
 }
