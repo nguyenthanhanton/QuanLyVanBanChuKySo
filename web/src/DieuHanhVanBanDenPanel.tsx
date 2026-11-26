@@ -5,10 +5,12 @@ type Row={maVanBanDen:string;tieuDe:string;soDen:number|null;trangThai:string;
   trangThaiXuLy:string|null;soBaoCao:number;soPhong:number;chiDao:string|null;ketQuaTongHop:string|null};
 type Department={maPhongBan:number;tenPhongBan:string};
 type Report={maPhongBan:number;tenPhongBan:string;nguoiBaoCao:string;noiDung:string;thoiDiemBaoCao:string};
-type Person={maNguoiDung:number;maPhongBan:number;hoTen:string};
-type Assignment={maPhongBan:number;maNguoiChuTri:number;tenNguoiChuTri:string;tenNguoiPhoiHop:string|null;ghiChu:string|null};
+type Person={maNguoiDung:number;maPhongBan:number;hoTen:string;tenChucVu:string|null};
+type Assignment={maPhongBan:number;maNguoiChuTri:number;tenNguoiChuTri:string;chucVuChuTri:string|null;tenNguoiPhoiHop:string|null;ghiChu:string|null};
+type Evidence={maMinhChung:string;maPhongBan:number;tenTep:string;nguoiTaiLen:string};
+type Reassignment={maLichSu:number;maPhongBan:number;nguoiCu:string;nguoiMoi:string;nguoiDieuChinh:string;lyDo:string};
 type People={rooms:{maPhongBan:number;tenPhongBan:string;laPhongChuTri:boolean}[];
-  employees:Person[];assigned:Assignment[];actorDepartment:number|null;canAssign:boolean;canReport:boolean};
+  employees:Person[];assigned:Assignment[];changes:Reassignment[];actorDepartment:number|null;canAssign:boolean;canReport:boolean};
 type Inbox={rows:Row[];departments:Department[];leader:boolean;clerk:boolean};
 const empty:Inbox={rows:[],departments:[],leader:false,clerk:false};
 // Dapper tra ve ten cot PascalCase, con record C# duoc serialize camelCase.
@@ -33,6 +35,10 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
   const [personalOwner,setPersonalOwner]=useState('');
   const [personalHelpers,setPersonalHelpers]=useState<number[]>([]);
   const [personalNote,setPersonalNote]=useState('');
+  const [reason,setReason]=useState('');
+  const [reassignOpen,setReassignOpen]=useState(false);
+  const [evidence,setEvidence]=useState<Evidence[]>([]);
+  const [evidenceFile,setEvidenceFile]=useState<File|null>(null);
   const [page,setPage]=useState(1);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
@@ -50,10 +56,12 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
   const choose=async(row:Row)=>{
     setSelected(row.maVanBanDen);setLead(row.maPhongChuTri?String(row.maPhongChuTri):'');
     setPartners([]);setResult('');setReports([]);setPeople(null);setPersonalOwner('');
-    setPersonalHelpers([]);setPersonalNote('');setMessage('');setError('');
+    setPersonalHelpers([]);setPersonalNote('');setReason('');setReassignOpen(false);
+    setEvidence([]);setEvidenceFile(null);setMessage('');setError('');
     if(row.maPhongChuTri)try{
-      const [existing,assignment]=await Promise.all([api(`/${row.maVanBanDen}/reports`),api(`/${row.maVanBanDen}/people`)]);
-      setReports(existing);setPeople(assignment);
+      const [existing,assignment,files]=await Promise.all([
+        api(`/${row.maVanBanDen}/reports`),api(`/${row.maVanBanDen}/people`),api(`/${row.maVanBanDen}/evidence`)]);
+      setReports(existing);setPeople(assignment);setEvidence(files);
     }
       catch(e){setError((e as Error).message);}
   };
@@ -63,12 +71,39 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
       await load();await onUpdated();
       if(selected&&(path.includes('/report')||path.includes('/people'))){
         setReports(await api(`/${selected}/reports`));setPeople(await api(`/${selected}/people`));
+        setEvidence(await api(`/${selected}/evidence`));setReassignOpen(false);setReason('');
       }
     }catch(e){setError((e as Error).message);}finally{setBusy(false);}
   };
   const picked=data.rows.find(row=>row.maVanBanDen===selected);
   const myRoom=people?.rooms.find(room=>room.maPhongBan===people.actorDepartment);
   const myMembers=people?.employees.filter(person=>person.maPhongBan===people.actorDepartment)??[];
+  const myAssignment=people?.assigned.find(item=>item.maPhongBan===people.actorDepartment);
+  const personLabel=(person:Person)=>`${person.hoTen}${person.tenChucVu?` — ${person.tenChucVu}`:''}`;
+  const uploadEvidence=async()=>{
+    if(!evidenceFile||!selected)return;
+    if(evidenceFile.size>5*1024*1024){setError('Ảnh minh chứng tối đa 5 MB.');return;}
+    setBusy(true);setError('');
+    try{
+      const form=new FormData();form.append('tepMinhChung',evidenceFile);
+      const response=await fetch(`/api/v1/incoming-work/${selected}/evidence`,{
+        method:'POST',headers:{Authorization:`Bearer ${token}`},body:form});
+      const value=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(value.message??`Lỗi ${response.status}`);
+      setMessage(value.message);setEvidenceFile(null);
+      setEvidence(await api(`/${selected}/evidence`));
+    }catch(err){setError((err as Error).message);}finally{setBusy(false);}
+  };
+  const viewEvidence=async(id:string,name:string)=>{
+    try{
+      const response=await fetch(`/api/v1/incoming-work/${selected}/evidence/${id}`,{
+        headers:{Authorization:`Bearer ${token}`}});
+      if(!response.ok)throw new Error(`Không thể xem ảnh ${name}: ${response.status}`);
+      const url=URL.createObjectURL(await response.blob());
+      window.open(url,'_blank','noopener,noreferrer');
+      window.setTimeout(()=>URL.revokeObjectURL(url),60000);
+    }catch(err){setError((err as Error).message);}
+  };
   const status=(row:Row)=>row.trangThaiXuLy==='HOAN_THANH'?'Hoàn thành':
     row.trangThaiXuLy==='DANG_XU_LY'?'Đang xử lý':
     row.trangThai==='CHO_LANH_DAO'?'Chờ lãnh đạo giao':'Chờ văn thư trình';
@@ -117,40 +152,65 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
           {people?.rooms.map(room=>{
             const assigned=people.assigned.find(a=>a.maPhongBan===room.maPhongBan);
             return <p key={room.maPhongBan}><strong>{room.tenPhongBan}</strong> ({room.laPhongChuTri?'Chủ trì':'Phối hợp'}): {' '}
-              {assigned?`${assigned.tenNguoiChuTri} — chủ trì cá nhân${assigned.tenNguoiPhoiHop?`; phối hợp: ${assigned.tenNguoiPhoiHop}`:''}`:'Chưa phân công cá nhân'}</p>;
+              {assigned?`${assigned.tenNguoiChuTri}${assigned.chucVuChuTri?` (${assigned.chucVuChuTri})`:''} — chủ trì cá nhân${assigned.tenNguoiPhoiHop?`; phối hợp: ${assigned.tenNguoiPhoiHop}`:''}`:'Chưa phân công cá nhân'}</p>;
           })}
         </div>
-        {picked.trangThaiXuLy==='DANG_XU_LY'&&people?.canAssign&&myRoom&&<div className="incoming-work-form">
+        {people?.changes.length? <div className="incoming-work-report"><strong>Lịch sử điều chỉnh phân công</strong>
+          {people.changes.map(item=><p key={item.maLichSu}>{item.nguoiCu} → {item.nguoiMoi}
+            {' · '}{item.nguoiDieuChinh}: {item.lyDo}</p>)}
+        </div>:null}
+        {picked.trangThaiXuLy==='DANG_XU_LY'&&people?.canAssign&&myRoom&&<>
+          {myAssignment&&!reassignOpen&&<div className="incoming-work-report">
+            <strong>Đã giao cho {myAssignment.tenNguoiChuTri}{myAssignment.chucVuChuTri?` — ${myAssignment.chucVuChuTri}`:''}</strong>
+            <p>Phân công được khóa sau khi giao. Muốn thay đổi phải ghi lý do.</p>
+            <button className="secondary small" disabled={busy||reports.some(r=>r.maPhongBan===myRoom.maPhongBan)}
+              onClick={()=>{setReassignOpen(true);setPersonalOwner(String(myAssignment.maNguoiChuTri));}}>
+              Đổi phân công</button></div>}
+          {(!myAssignment||reassignOpen)&&<div className="incoming-work-form">
           <h4>Phân công người thực hiện — {myRoom.tenPhongBan}</h4>
           <label>Cá nhân chủ trì thực hiện
             <select value={personalOwner} onChange={e=>{
               setPersonalOwner(e.target.value);setPersonalHelpers(p=>p.filter(x=>x!==Number(e.target.value)));}}>
               <option value="">Chọn một người chịu trách nhiệm</option>
-              {myMembers.map(member=><option key={member.maNguoiDung} value={member.maNguoiDung}>{member.hoTen}</option>)}
+              {myMembers.map(member=><option key={member.maNguoiDung} value={member.maNguoiDung}>{personLabel(member)}</option>)}
             </select></label>
           <div><strong>Cá nhân phối hợp trong phòng (không bắt buộc)</strong>
             <div className="incoming-work-checks">{myMembers.filter(member=>String(member.maNguoiDung)!==personalOwner)
               .map(member=><label key={member.maNguoiDung}>
                 <input type="checkbox" checked={personalHelpers.includes(member.maNguoiDung)} onChange={e=>
                   setPersonalHelpers(list=>e.target.checked?[...list,member.maNguoiDung]:list.filter(x=>x!==member.maNguoiDung))}/>
-                {member.hoTen}</label>)}</div></div>
+                {personLabel(member)}</label>)}</div></div>
           <label>Ghi chú giao việc<textarea maxLength={2000} value={personalNote} onChange={e=>setPersonalNote(e.target.value)}/></label>
-          <button className="primary small" disabled={busy||!personalOwner} onClick={()=>submit(`/${selected}/people`,{
+          {myAssignment&&<label>Lý do thay đổi phân công (bắt buộc)
+            <textarea maxLength={1000} value={reason} onChange={e=>setReason(e.target.value)}
+              placeholder="Giải thích vì sao cần giao lại, lưu trong lịch sử điều chỉnh"/></label>}
+          <button className="primary small" disabled={busy||!personalOwner||(Boolean(myAssignment)&&!reason.trim())} onClick={()=>submit(`/${selected}/people`,{
             maPhongBan:myRoom.maPhongBan,maNguoiChuTri:Number(personalOwner),
-            maNguoiPhoiHop:personalHelpers,ghiChu:personalNote})}>Giao cho cá nhân</button>
-        </div>}
+            maNguoiPhoiHop:personalHelpers,ghiChu:personalNote,lyDoGiaoLai:reason})}>
+            {myAssignment?'Xác nhận giao lại':'Giao cho cá nhân'}</button>
+          {myAssignment&&<button className="secondary small" onClick={()=>setReassignOpen(false)}>Hủy thay đổi</button>}
+        </div>}</>}
         {reports.map(r=><div className="incoming-work-report" key={r.maPhongBan}><strong>{r.tenPhongBan} — {r.nguoiBaoCao}</strong>
           <p>{r.noiDung}</p></div>)}
         {reports.length===0&&<p className="subtle">Chưa có báo cáo từ các phòng.</p>}
+        {evidence.length>0&&<div className="incoming-work-report"><strong>Ảnh minh chứng</strong>
+          {evidence.map(file=><p key={file.maMinhChung}>{file.tenTep} — {file.nguoiTaiLen} {' '}
+            <button className="secondary small" onClick={()=>viewEvidence(file.maMinhChung,file.tenTep)}>Xem ảnh</button></p>)}
+        </div>}
         {picked.trangThaiXuLy==='DANG_XU_LY'&&<div className="incoming-work-form">
           <label>Kết quả thực hiện (chỉ cá nhân chủ trì được phân công mới gửi được)
             <textarea value={result} onChange={e=>setResult(e.target.value)} maxLength={4000}/></label>
           <button className="secondary small" disabled={busy||!result.trim()||!people?.canReport} onClick={()=>submit(`/${selected}/report`,{noiDung:result})}>
             Gửi báo cáo của phòng</button>
+          {people?.canReport&&reports.some(report=>report.maPhongBan===people.actorDepartment)&&<div>
+            <label>Đính kèm ảnh minh chứng (PNG/JPG/WEBP, tối đa 5 MB/ảnh)
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>setEvidenceFile(e.target.files?.[0]??null)}/></label>
+            <button className="secondary small" disabled={busy||!evidenceFile} onClick={uploadEvidence}>Tải ảnh minh chứng</button>
+          </div>}
           {data.leader&&<button className="primary small" disabled={busy||!result.trim()||picked.soBaoCao===0}
-            onClick={()=>submit(`/${selected}/complete`,{ketQuaTongHop:result})}>Kết thúc xử lý (kết quả tổng hợp)</button>}
+            onClick={()=>submit(`/${selected}/complete`,{ketQuaTongHop:result})}>Kết thúc xử lý (Kết luận cấp trên)</button>}
         </div>}
-        {picked.ketQuaTongHop&&<p><strong>Kết quả tổng hợp:</strong> {picked.ketQuaTongHop}</p>}
+        {picked.ketQuaTongHop&&<p><strong>Kết luận cấp trên:</strong> {picked.ketQuaTongHop}</p>}
       </>}
     </div>}
   </section>;
