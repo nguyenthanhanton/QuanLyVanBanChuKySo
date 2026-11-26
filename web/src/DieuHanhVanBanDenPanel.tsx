@@ -8,7 +8,7 @@ type Report={maPhongBan:number;tenPhongBan:string;nguoiBaoCao:string;noiDung:str
 type Person={maNguoiDung:number;maPhongBan:number;hoTen:string};
 type Assignment={maPhongBan:number;maNguoiChuTri:number;tenNguoiChuTri:string;tenNguoiPhoiHop:string|null;ghiChu:string|null};
 type People={rooms:{maPhongBan:number;tenPhongBan:string;laPhongChuTri:boolean}[];
-  employees:Person[];assigned:Assignment[];actorDepartment:number|null;canAssign:boolean};
+  employees:Person[];assigned:Assignment[];actorDepartment:number|null;canAssign:boolean;canReport:boolean};
 type Inbox={rows:Row[];departments:Department[];leader:boolean;clerk:boolean};
 const empty:Inbox={rows:[],departments:[],leader:false,clerk:false};
 
@@ -61,7 +61,6 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
   const picked=data.rows.find(row=>row.maVanBanDen===selected);
   const myRoom=people?.rooms.find(room=>room.maPhongBan===people.actorDepartment);
   const myMembers=people?.employees.filter(person=>person.maPhongBan===people.actorDepartment)??[];
-  const myAssignment=people?.assigned.find(item=>item.maPhongBan===people.actorDepartment);
   const status=(row:Row)=>row.trangThaiXuLy==='HOAN_THANH'?'Hoàn thành':
     row.trangThaiXuLy==='DANG_XU_LY'?'Đang xử lý':
     row.trangThai==='CHO_LANH_DAO'?'Chờ lãnh đạo giao':'Chờ văn thư trình';
@@ -138,7 +137,7 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
         {picked.trangThaiXuLy==='DANG_XU_LY'&&<div className="incoming-work-form">
           <label>Kết quả thực hiện (chỉ cá nhân chủ trì được phân công mới gửi được)
             <textarea value={result} onChange={e=>setResult(e.target.value)} maxLength={4000}/></label>
-          <button className="secondary small" disabled={busy||!result.trim()||!myAssignment} onClick={()=>submit(`/${selected}/report`,{noiDung:result})}>
+          <button className="secondary small" disabled={busy||!result.trim()||!people?.canReport} onClick={()=>submit(`/${selected}/report`,{noiDung:result})}>
             Gửi báo cáo của phòng</button>
           {data.leader&&<button className="primary small" disabled={busy||!result.trim()||picked.soBaoCao===0}
             onClick={()=>submit(`/${selected}/complete`,{ketQuaTongHop:result})}>Kết thúc xử lý (kết quả tổng hợp)</button>}
