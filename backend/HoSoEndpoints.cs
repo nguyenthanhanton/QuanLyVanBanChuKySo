@@ -266,6 +266,52 @@ public static class HoSoEndpoints
             return Results.File(file.DuongDanLuuTru,"application/pdf");
         });
 
+        routes.MapGet("/{id:guid}/incoming-documents/{documentId:guid}/attachments",async(
+            Guid id,Guid documentId,HttpContext http,PhanQuyen permission,Database db)=>{
+            var(actor,admin,error)=await Quyen(http,permission);if(error!=null)return error;
+            using var cn=db.Open();
+            var files=await cn.QueryAsync(@"
+                SELECT f.MaTep,f.TenTep,f.LoaiNoiDung,f.KichThuoc
+                FROM dbo.HoSoLuuTru h
+                JOIN dbo.HoSoLuuTruVanBanDen hd ON hd.MaHoSo=h.MaHoSo AND hd.MaCoQuan=h.MaCoQuan
+                JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+                JOIN dbo.BanPhatHanhTep p ON p.MaPhatHanh=l.MaPhatHanh
+                JOIN dbo.TepDinhKem f ON f.MaTep=p.MaTep
+                WHERE h.MaHoSo=@id AND hd.MaVanBanDen=@documentId AND h.MaCoQuan=@agency
+                  AND d.MaCoQuanNhan=@agency AND l.MaCoQuanNhan=@agency AND "+DuocXem+@"
+                ORDER BY f.TenTep",new{id,documentId,agency=actor!.MaCoQuan,user=actor.MaNguoiDung,admin});
+            return Results.Ok(files);
+        });
+
+        routes.MapGet("/{id:guid}/incoming-documents/{documentId:guid}/attachments/{fileId:guid}",async(
+            Guid id,Guid documentId,Guid fileId,HttpContext http,PhanQuyen permission,Database db)=>{
+            var(actor,admin,error)=await Quyen(http,permission);if(error!=null)return error;
+            using var cn=db.Open();
+            var file=await cn.QueryFirstOrDefaultAsync<TepMinhChungRow>(@"
+                SELECT f.DuongDanLuuTru,f.TenTep,f.LoaiNoiDung,p.MaBamSha256
+                FROM dbo.HoSoLuuTru h
+                JOIN dbo.HoSoLuuTruVanBanDen hd ON hd.MaHoSo=h.MaHoSo AND hd.MaCoQuan=h.MaCoQuan
+                JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+                JOIN dbo.BanPhatHanhTep p ON p.MaPhatHanh=l.MaPhatHanh
+                JOIN dbo.TepDinhKem f ON f.MaTep=p.MaTep
+                WHERE h.MaHoSo=@id AND hd.MaVanBanDen=@documentId AND h.MaCoQuan=@agency
+                  AND d.MaCoQuanNhan=@agency AND l.MaCoQuanNhan=@agency AND p.MaTep=@fileId AND "+DuocXem,
+                new{id,documentId,fileId,agency=actor!.MaCoQuan,user=actor.MaNguoiDung,admin});
+            if(file is null)return Results.NotFound();
+            if(!File.Exists(file.DuongDanLuuTru) ||
+               await DichVuKyPdf.Bam(file.DuongDanLuuTru)!=file.MaBamSha256)
+                return Results.Conflict(new{message="Tệp đính kèm lưu trữ không còn nguyên vẹn."});
+            http.Response.Headers["X-Content-Type-Options"]="nosniff";
+            if(http.Request.Query.ContainsKey("preview")){
+                try{var preview=DichVuTepVanBan.XemTruocOffice(file.DuongDanLuuTru);
+                    return preview is null?Results.StatusCode(415):Results.Text(preview,"text/plain; charset=utf-8");}
+                catch(InvalidDataException){return Results.BadRequest(new{message="Tệp Office không đọc được."});}
+            }
+            return Results.File(file.DuongDanLuuTru,file.LoaiNoiDung,file.TenTep);
+        });
+
         routes.MapDelete("/{id:guid}/documents/{documentId:guid}",async(Guid id,Guid documentId,
             HttpContext http,PhanQuyen permission,Database db)=>{
             var(actor,admin,error)=await Quyen(http,permission);if(error!=null)return error;
