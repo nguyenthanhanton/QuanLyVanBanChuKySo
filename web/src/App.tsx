@@ -173,6 +173,8 @@ type MonitorReport={NguoiXuLy:string;PhongBan:string;Tong:number;DangCho:number;
   QuaHan:number;DungHan:number;PhutTrungBinh:number|null};
 type MonitorNotification={MaThamChieu:string;LoaiThongBao:string;MaVanBan:string;MaNoiBo:string;
   TieuDe:string;ThoiDiem:string;MucDo:string;DaDoc:boolean};
+type PersonalWork={MaThamChieu:string;MaNoiBo:string;TieuDe:string;Loai:string;
+  CongViec:string;HanXuLy:string|null;ThoiDiem:string};
 const deadlineLabels:Record<string,string>={HOAN_THANH:'Đã hoàn thành',QUA_HAN:'Quá hạn',
   SAP_DEN_HAN:'Sắp đến hạn',TRONG_HAN:'Trong hạn',CHUA_DAT_HAN:'Chưa đặt hạn'};
 const PAGE_SIZE=15;
@@ -1150,6 +1152,9 @@ export default function App() {
   const [remoteTimeline,setRemoteTimeline]=useState<{events:SuKien[];transfers:ChuyenPhat[]}|undefined>();
   const [journeyTimeline,setJourneyTimeline]=useState<{events:SuKien[];transfers:ChuyenPhat[]}|undefined>();
   const [workqueue,setWorkqueue]=useState<Record<string,unknown>[]>([]);
+  const [personalWork,setPersonalWork]=useState<PersonalWork[]>([]);
+  const [workFilter,setWorkFilter]=useState('TAT_CA');
+  const [workLoading,setWorkLoading]=useState(false);
   const [monitorTasks,setMonitorTasks]=useState<MonitorTask[]>([]);
   const [monitorReports,setMonitorReports]=useState<MonitorReport[]>([]);
   const [notifications,setNotifications]=useState<MonitorNotification[]>([]);
@@ -1175,6 +1180,14 @@ export default function App() {
     window.addEventListener('focus',poll);
     return()=>{active=false;window.clearInterval(interval);window.removeEventListener('focus',poll);};
   },[token]);
+  useEffect(()=>{
+    if(DEMO||!token||page!=='cong-viec')return;
+    let active=true;setWorkLoading(true);
+    requestApi('/my-work',token).then((items:PersonalWork[])=>{if(active)setPersonalWork(items);})
+      .catch(err=>{if(active)setError((err as Error).message);})
+      .finally(()=>{if(active)setWorkLoading(false);});
+    return()=>{active=false;};
+  },[token,page]);
   const [agencyOptions,setAgencyOptions]=useState<{value:string;label:string}[]>(DEMO?[{value:'Cơ quan B',label:'Cơ quan B'},{value:'Cơ quan C',label:'Cơ quan C'}]:[]);
   const [error,setError]=useState('');
 
@@ -1193,6 +1206,17 @@ export default function App() {
     return !term || `${d.code} ${d.title} ${d.number||''}`.toLocaleLowerCase('vi-VN').includes(term);
   }).sort((a,b)=>new Date(b.createdAt).getTime()-new Date(a.createdAt).getTime()),[visibleDocs,page,filter,query]);
   const monitoredRows=monitorTasks.filter(t=>monitorFilter==='ALL'||t.TinhTrangHan===monitorFilter);
+  const myWorkItems=useMemo(()=>[
+    ...workqueue.map(t=>({MaThamChieu:String(field(t,'MaVanBan')),
+      MaNoiBo:String(field(t,'MaNoiBo')),TieuDe:String(field(t,'TieuDe')),
+      Loai:'DUYET_KY',CongViec:String(field(t,'Buoc')??'Chờ ký/duyệt'),
+      HanXuLy:(field(t,'HanXuLy') as string|null)??null,
+      ThoiDiem:String(field(t,'ThoiDiemTao')??''),key:`workflow-${field(t,'MaTacVu')}`,
+      taskId:String(field(t,'MaTacVu'))})),
+    ...personalWork.map((t,i)=>({...t,key:`${t.Loai}-${t.MaThamChieu}-${t.CongViec}-${i}`}))
+  ].filter(t=>workFilter==='TAT_CA'||t.Loai===workFilter)
+    .sort((a,b)=>new Date(b.ThoiDiem).getTime()-new Date(a.ThoiDiem).getTime()),
+  [workqueue,personalWork,workFilter]);
   const currentDoc=visibleDocs.find(d=>d.id===selected);
   const fetchTimeline=async(d:VanBan)=>{
     if(d.type==='DEN')return {events:[] as SuKien[],transfers:[] as ChuyenPhat[]};
@@ -1233,18 +1257,6 @@ export default function App() {
       try{setRemoteTimeline(await fetchTimeline(d));}catch(err){setError((err as Error).message);}
     }
   };
-  const openWorkqueueDocument=async(task:Record<string,unknown>)=>{
-    const id=String(field(task,'MaVanBan')??'');
-    const existing=visibleDocs.find(d=>d.id===id);
-    if(existing){await openDoc(existing);return;}
-    if(!token||!id)return;
-    try{
-      const response=await requestApi(`/documents/${id}`,token) as Record<string,unknown>;
-      const document=adaptLiveDocument(response);
-      setDocs(previous=>previous.some(d=>d.id===id)?previous:[...previous,document]);
-      await openDoc(document);
-    }catch(err){setError(`Không thể mở văn bản của tác vụ: ${(err as Error).message}`);}
-  };
   const pickJourney=async(d:VanBan)=>{
     setJourneyPick(d.id);setJourneyTimeline(undefined);
     if(!DEMO&&token){
@@ -1278,6 +1290,7 @@ export default function App() {
     }));
     setDocs([...(documents as Record<string,unknown>[]).map(adaptLiveDocument),...inbound]);
     setWorkqueue(tasks as Record<string,unknown>[]);
+    requestApi('/my-work',authToken).then((items:PersonalWork[])=>setPersonalWork(items)).catch(()=>{});
     const [progress,messages]=await Promise.all([
       requestApi('/monitor/tasks',authToken).catch(()=>[]),
       requestApi('/monitor/notifications',authToken).catch(()=>[])
@@ -1551,15 +1564,31 @@ export default function App() {
             </>})():<EmptyView title="Chọn một văn bản" message="Thông tin hành trình sẽ xuất hiện tại đây." icon={Route}/>}</div>
         </div></>}
 
-      {page==='cong-viec'&&<><div className="page-intro compact"><div><div className="overline">HÀNG ĐỢI CÔNG VIỆC</div><h1>Việc cần xử lý</h1><p>Các văn bản đang chờ bạn kiểm tra, phê duyệt hoặc giải quyết.</p></div></div>
-        <div className="panel tasks-panel"><div className="panel-head"><h3>Công việc của tôi</h3><span className="count-bubble">{DEMO?visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length:workqueue.length}</span></div>
+      {page==='cong-viec'&&<><div className="page-intro compact"><div><div className="overline">HÀNG ĐỢI CÔNG VIỆC</div><h1>Việc cần xử lý</h1><p>Bản nháp của bạn, văn bản cần ký/duyệt, văn bản đến được giao và việc cần tiếp nhận.</p></div></div>
+        <div className="panel tasks-panel"><div className="panel-head"><h3>Công việc của tôi</h3><span className="count-bubble">{DEMO?visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length:workqueue.length+personalWork.length}</span></div>
+          {!DEMO&&<div className="my-work-filters">
+            {([['TAT_CA','Tất cả'],['BAN_NHAP','Bản nháp của tôi'],['DUYET_KY','Chờ ký / duyệt'],['VAN_BAN_DEN','Cấp trên giao việc'],['TIEP_NHAN','Chờ tiếp nhận']] as const)
+              .map(([value,label])=><button key={value} className={workFilter===value?'active':''}
+                onClick={()=>{setWorkFilter(value);setTaskPage(1);}}>{label}</button>)}
+          </div>}
           {DEMO?pageRows(visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')),taskPage).map(d=><button className="task-row" key={d.id} onClick={()=>openDoc(d)}><div className="task-icon"><FileClock size={20}/></div><div><strong>{d.title}</strong><small>{d.code} · Hạn {formatDate(d.dueAt)}</small></div><Status status={d.status}/><ChevronRight size={18}/></button>)
-           :pageRows(workqueue,taskPage).map(t=>{const progress=monitorTasks.find(m=>m.MaTacVu===String(field(t,'MaTacVu')));
-             return <button className="task-row" key={String(field(t,'MaTacVu'))} onClick={()=>void openWorkqueueDocument(t)}><div className="task-icon"><FileClock size={20}/></div><div><strong>{String(field(t,'TieuDe'))}</strong>
-               <small>{String(field(t,'MaNoiBo'))} · {String(field(t,'Buoc'))} · Hạn: {formatDate(progress?.HanXuLy??undefined)}</small></div>
-               <span className={`deadline-pill ${progress?.TinhTrangHan??''}`}>{deadlineLabels[progress?.TinhTrangHan??'']??'Đang xử lý'}</span><ChevronRight size={18}/></button>;})}
+           :pageRows(myWorkItems,taskPage).map(t=>{
+             const kind=t.Loai==='BAN_NHAP'?'Bản nháp':t.Loai==='DUYET_KY'?'Chờ ký / duyệt':
+               t.Loai==='TIEP_NHAN'?'Giao nhận':'Văn bản đến';
+             const Icon=t.Loai==='BAN_NHAP'?FileText:t.Loai==='DUYET_KY'?FileSignature:t.Loai==='TIEP_NHAN'?Inbox:ListTodo;
+             return <button className="task-row my-work-row" key={t.key} onClick={()=>{
+               if(t.Loai==='VAN_BAN_DEN'){setIncomingFocus(t.MaThamChieu);setPage('van-ban-den');setSelected(null);}
+               else if(t.Loai==='TIEP_NHAN'){setIncomingFocus('');setPage('van-ban-den');setSelected(null);}
+               else void openMonitoredDocument(t.MaThamChieu);
+             }}><div className="task-icon"><Icon size={20}/></div><div className="my-work-description"><strong>{t.TieuDe}</strong>
+               <small>{t.MaNoiBo} · {t.CongViec}</small>
+               {t.HanXuLy&&<small>Hạn xử lý: {formatDate(t.HanXuLy)}</small>}</div>
+               <span className={`my-work-kind ${t.Loai.toLowerCase()}`}>{kind}</span><ChevronRight size={18}/></button>;
+           })}
+          {!DEMO&&!workLoading&&myWorkItems.length===0&&<EmptyView title="Không có việc đang chờ" message="Bản nháp, nhiệm vụ ký/duyệt và công việc được giao sẽ hiện tại đây." icon={CheckCheck}/>}
+          {!DEMO&&workLoading&&<p className="subtle my-work-loading">Đang tải công việc của bạn...</p>}
           {DEMO&&visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length===0&&<EmptyView title="Không có việc đang chờ" message="Các công việc được giao sẽ hiện tại đây." icon={CheckCheck}/>}
-          <Pagination total={DEMO?visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length:workqueue.length} page={taskPage} onPage={setTaskPage}/></div></>}
+          <Pagination total={DEMO?visibleDocs.filter(d=>d.assignee===actor.name||d.assignee.includes(actor.name.split(' ').at(-1)||'___')).length:myWorkItems.length} page={taskPage} onPage={setTaskPage}/></div></>}
 
       {page==='giao-nhan'&&<><div className="page-intro compact"><div><div className="overline">CHUYỂN PHÁT LIÊN CƠ QUAN</div><h1>Giao nhận văn bản</h1><p>Biên nhận được theo dõi độc lập tại mỗi cơ quan nhận.</p></div></div>
         {!DEMO&&<LiveDeliveries token={token} direction="out" onUpdated={updateAfterOperation}/>}
