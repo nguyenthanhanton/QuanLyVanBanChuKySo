@@ -48,6 +48,7 @@ app.MapPhatHanh();
 app.MapQuanTriNguoiDung();
 app.MapQuanTriPhongBan();
 app.MapQuanTriPhanQuyen();
+app.MapQuanTriHeThong();
 app.MapUyQuyenKy();
 app.MapGiamSat();
 app.MapHoSo();
