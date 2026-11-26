@@ -2,6 +2,7 @@ import {useEffect,useMemo,useState,type FormEvent} from 'react';
 import {Archive,ChevronLeft,ChevronRight,FileText,FolderPlus,RefreshCw,Search} from 'lucide-react';
 import type {VanBan} from './types';
 import {formatDate} from './types';
+import NopLuuPanel from './NopLuuPanel';
 
 type Department={MaPhongBan:number;TenPhongBan:string};
 type Dossier={MaHoSo:string;MaHoSoNoiBo:string;TenHoSo:string;LoaiHoSo:string;NamHoSo:number;
@@ -98,7 +99,7 @@ export default function HoSoPage({token,documents,onOpen}:{token:string;document
   };
 
   return <div className="archive-page">
-    <div className="page-intro compact"><div><div className="overline">LƯU TRỮ ĐIỆN TỬ · 0.7</div>
+    <div className="page-intro compact"><div><div className="overline">LƯU TRỮ ĐIỆN TỬ · 0.7.1</div>
       <h1>Hồ sơ lưu trữ</h1><p>Lập hồ sơ theo năm, phòng ban; lưu liên kết văn bản đã phát hành và lịch sử thao tác.</p></div>
       <button className="primary" onClick={()=>{setSelected(null);setDetails(null);resetForm();setEditing(false);setCreating(true);}}>
         <FolderPlus size={17}/> Tạo hồ sơ</button></div>
@@ -169,6 +170,8 @@ export default function HoSoPage({token,documents,onOpen}:{token:string;document
           <small>{e.NguoiThucHien} · {formatDate(e.ThoiDiem)}</small></div>)}</div>
         <Pages count={details.LichSu.length} page={historyPage} change={setHistoryPage}/>
       </div></div>}
+    <NopLuuPanel token={token} selected={selected} closed={details?.HoSo.DaDong} documents={documents} onOpen={onOpen}
+      onChanged={async()=>{await load();if(selected)await loadDetails(selected);}}/>
     <p className="fine-note">Hồ sơ chỉ lưu liên kết; không sao chép, sửa hay xóa PDF đã ký. Quyền truy cập văn bản tiếp tục được kiểm tra ở máy chủ.</p>
   </div>;
 }
