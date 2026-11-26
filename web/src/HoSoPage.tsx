@@ -4,6 +4,7 @@ import type {VanBan} from './types';
 import {formatDate} from './types';
 import NopLuuPanel from './NopLuuPanel';
 import LuuTruNangCaoPanel from './LuuTruNangCaoPanel';
+import TepDinhKemVanBanDen from './TepDinhKemVanBanDen';
 
 type Department={MaPhongBan:number;TenPhongBan:string};
 type Dossier={MaHoSo:string;MaHoSoNoiBo:string;TenHoSo:string;LoaiHoSo:string;NamHoSo:number;
@@ -205,6 +206,7 @@ export default function HoSoPage({token,documents,onOpen}:{token:string;document
           <FileText size={19}/><div><strong>{d.TieuDe}</strong>
             <small>Số đến {d.SoDen}/{d.Nam} · {d.TrangThai} · Thêm bởi {d.NguoiThem}</small></div>
           <button className="secondary small" onClick={()=>openIncomingPdf(d.MaVanBanDen)}>Xem PDF đã ký</button>
+          <TepDinhKemVanBanDen url={`/api/v1/dossiers/${selected}/incoming-documents/${d.MaVanBanDen}/attachments`} token={token}/>
           {!details.HoSo.DaDong&&<button className="secondary small" disabled={busy} onClick={()=>{
             if(!window.confirm('Gỡ văn bản đến khỏi hồ sơ? Bản gốc vẫn được giữ nguyên.'))return;
             void perform(async()=>{await api(`/${selected}/incoming-documents/${d.MaVanBanDen}`,token,{method:'DELETE'});},
