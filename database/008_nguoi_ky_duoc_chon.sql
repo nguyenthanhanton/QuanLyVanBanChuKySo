@@ -10,11 +10,17 @@ BEGIN
     BEGIN TRANSACTION;
     IF NOT EXISTS(SELECT 1 FROM dbo.PhienBanLuocDo WHERE SoPhienBan=7)
         THROW 51008,N'Can chay migration 007 truoc 008.',1;
-    ALTER TABLE dbo.VanBan ADD
-        MaNguoiKyNhay INT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
-        MaNguoiKyLanhDao INT NULL REFERENCES dbo.NguoiDung(MaNguoiDung),
-        SoBuocKy TINYINT NOT NULL CONSTRAINT DF_VanBan_SoBuocKy DEFAULT 5;
-    ALTER TABLE dbo.VanBan WITH CHECK ADD CONSTRAINT CK_VanBan_SoBuocKy CHECK(SoBuocKy IN (4,5));
+    IF COL_LENGTH('dbo.VanBan','MaNguoiKyNhay') IS NULL
+        ALTER TABLE dbo.VanBan ADD MaNguoiKyNhay INT NULL REFERENCES dbo.NguoiDung(MaNguoiDung);
+    IF COL_LENGTH('dbo.VanBan','MaNguoiKyLanhDao') IS NULL
+        ALTER TABLE dbo.VanBan ADD MaNguoiKyLanhDao INT NULL REFERENCES dbo.NguoiDung(MaNguoiDung);
+    IF COL_LENGTH('dbo.VanBan','SoBuocKy') IS NULL
+        ALTER TABLE dbo.VanBan ADD SoBuocKy TINYINT NOT NULL
+            CONSTRAINT DF_VanBan_SoBuocKy DEFAULT 5;
+    -- SQL Server compiles CHECK expressions before ALTER ADD becomes visible in the same batch.
+    IF NOT EXISTS(SELECT 1 FROM sys.check_constraints
+                  WHERE parent_object_id=OBJECT_ID('dbo.VanBan') AND name='CK_VanBan_SoBuocKy')
+        EXEC sys.sp_executesql N'ALTER TABLE dbo.VanBan WITH CHECK ADD CONSTRAINT CK_VanBan_SoBuocKy CHECK(SoBuocKy IN (4,5))';
     INSERT dbo.PhienBanLuocDo(SoPhienBan,TenPhienBan)
     VALUES(8,N'Chon nguoi ky theo phong ban - quy trinh 4 vi tri cho van ban moi');
     COMMIT TRANSACTION;
