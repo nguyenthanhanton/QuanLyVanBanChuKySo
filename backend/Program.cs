@@ -53,4 +53,5 @@ app.MapGiamSat();
 app.MapHoSo();
 app.MapNopLuu();
 app.MapLuuTruNangCao();
+app.MapDieuHanhVanBanDen();
 app.Run();
