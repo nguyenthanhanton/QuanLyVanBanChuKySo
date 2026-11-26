@@ -137,3 +137,11 @@
 @media(max-width:960px){.admin-user-row{grid-template-columns:1fr 1fr}.admin-user-actions{grid-column:1/-1}}
 @media(max-width:540px){.admin-user-row{grid-template-columns:1fr}.admin-user-actions{grid-column:auto}}
 @media(max-width:700px){.admin-create .admin-create-grid{grid-template-columns:1fr;gap:14px}.admin-create,.admin-users-list{padding:18px}.admin-create form>.primary{width:100%;justify-content:center}}
+.admin-delegation-history{margin:24px 18px 18px;border:1px solid #dbe5f1;border-radius:12px;overflow:hidden}
+.admin-delegation-history>.panel-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px;flex-wrap:wrap;background:#f8fbff}
+.admin-delegation-history>.panel-head label{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.admin-delegation-history>.panel-head select{max-width:240px;min-width:160px}
+.admin-delegation-history-row{padding:16px 18px;border-top:1px solid #e2eaf4;overflow-wrap:anywhere}
+.admin-delegation-history-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.admin-delegation-history-head>span{color:#1e62a6;background:#ecf5ff;border-radius:20px;padding:3px 10px;font-size:12px}
+.admin-delegation-history-row p{margin:7px 0;color:#516680;line-height:1.5}
