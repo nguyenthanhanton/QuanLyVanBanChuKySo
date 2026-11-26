@@ -585,7 +585,7 @@ function DepartmentAdministration({token}:{token:string}){
   };
   return <section className="panel admin-departments"><div className="panel-head"><div>
     <h3>Quản lý cơ cấu phòng ban</h3>
-    <p>Đặt thứ tự từ cao xuống thấp, chọn phòng trực thuộc; không xóa dữ liệu lịch sử.</p>
+    <p>Thứ tự hiển thị: số nhỏ xếp trước. Trực thuộc: chọn đơn vị quản lý cấp trên; không tự cấp quyền ký hoặc duyệt văn bản.</p>
     </div><button className="secondary small" disabled={busy} onClick={()=>load().catch(e=>setError((e as Error).message))}><RefreshCw size={15}/> Tải lại</button></div>
     <h4 className="admin-department-section-title">Thêm phòng ban mới</h4>
     <form className="admin-department-create" onSubmit={e=>{e.preventDefault();act(async()=>{
@@ -597,8 +597,8 @@ function DepartmentAdministration({token}:{token:string}){
         onChange={e=>setCode(e.target.value.toUpperCase())}/></label>
       <label>Tên phòng ban<input required value={name} maxLength={200} placeholder="VD: Phòng Kế toán"
         onChange={e=>setName(e.target.value)}/></label>
-      <label>Thứ tự<input type="number" value={order} min={0} max={9999} onChange={e=>setOrder(Number(e.target.value))}/></label>
-      <label>Trực thuộc<select value={parent} onChange={e=>setParent(Number(e.target.value))}>
+      <label>Thứ tự hiển thị<input type="number" value={order} min={0} max={9999} onChange={e=>setOrder(Number(e.target.value))}/></label>
+      <label>Phòng cấp trên (trực thuộc)<select value={parent} onChange={e=>setParent(Number(e.target.value))}>
         <option value={0}>Trực thuộc cơ quan</option>
         {items.filter(d=>d.DangHoatDong).map(d=><option key={d.MaPhongBan} value={d.MaPhongBan}>{d.TenPhongBan}</option>)}
       </select></label>
@@ -613,9 +613,9 @@ function DepartmentAdministration({token}:{token:string}){
           <span className={d.DangHoatDong?'success-note':'form-error'}>{d.DangHoatDong?'Đang hoạt động':'Ngừng hoạt động'}</span></div>
         <div className="admin-department-fields"><label>Tên phòng<input disabled={busy||!d.DangHoatDong} value={edit.name}
           onChange={e=>setDraft(s=>({...s,[d.MaPhongBan]:{...edit,name:e.target.value}}))}/></label>
-        <label>Thứ tự<input disabled={busy||!d.DangHoatDong} type="number" min={0} max={9999} value={edit.order}
+        <label>Thứ tự hiển thị<input disabled={busy||!d.DangHoatDong} type="number" min={0} max={9999} value={edit.order}
           onChange={e=>setDraft(s=>({...s,[d.MaPhongBan]:{...edit,order:Number(e.target.value)}}))}/></label>
-        <label>Trực thuộc<select disabled={busy||!d.DangHoatDong||d.MaDinhDanh==='LANH_DAO'} value={edit.parent}
+        <label>Phòng cấp trên (trực thuộc)<select disabled={busy||!d.DangHoatDong||d.MaDinhDanh==='LANH_DAO'} value={edit.parent}
           onChange={e=>setDraft(s=>({...s,[d.MaPhongBan]:{...edit,parent:Number(e.target.value)}}))}>
           <option value={0}>Trực thuộc cơ quan</option>
           {items.filter(p=>p.DangHoatDong&&p.MaPhongBan!==d.MaPhongBan).map(p=><option key={p.MaPhongBan} value={p.MaPhongBan}>{p.TenPhongBan}</option>)}
