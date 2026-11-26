@@ -551,7 +551,7 @@ function DraftAttachmentEditor({doc,actor,token,onUpdated}:{doc:VanBan;actor:Act
 }
 
 type SigningChoice={maNguoiKyNhay:number;maNguoiKyLanhDao:number};
-type SignerOption={MaNguoiDung:number;HoTen:string;ChucVu:string;TenPhongBan:string};
+type SignerOption={MaNguoiDung:number;HoTen:string;ChucVu:string;TenPhongBan:string;VaiTroKy:string};
 function SignerPicker({doc,token,onClose,onSubmit}:{doc:VanBan;token:string;onClose:()=>void;
   onSubmit:(choice:SigningChoice)=>void}){
   const [reviewers,setReviewers]=useState<SignerOption[]>([]);
@@ -569,7 +569,8 @@ function SignerPicker({doc,token,onClose,onSubmit}:{doc:VanBan;token:string;onCl
       const second=(field(data,'nguoiKyLanhDao')??[]) as Record<string,unknown>[];
       const convert=(items:Record<string,unknown>[]):SignerOption[]=>items.map(x=>({
         MaNguoiDung:Number(field(x,'MaNguoiDung')),HoTen:String(field(x,'HoTen')),
-        ChucVu:String(field(x,'ChucVu')??''),TenPhongBan:String(field(x,'TenPhongBan')??'')
+        ChucVu:String(field(x,'ChucVu')??''),TenPhongBan:String(field(x,'TenPhongBan')??''),
+        VaiTroKy:String(field(x,'VaiTroKy')??'')
       }));
       const a=convert(first),b=convert(second);
       setReviewers(a);setLeaders(b);setReviewer(a[0]?.MaNguoiDung??0);setLeader(b[0]?.MaNguoiDung??0);
@@ -579,15 +580,15 @@ function SignerPicker({doc,token,onClose,onSubmit}:{doc:VanBan;token:string;onCl
   },[doc.id,token]);
   return <div className="preview-backdrop" onClick={onClose}><div className="signer-picker" onClick={e=>e.stopPropagation()}>
     <h3>Chọn người được phép ký văn bản</h3>
-    <p className="fine-note">Người soạn đã ký bước 1. Chọn trưởng đơn vị trực tiếp để ký nháy (bước 2) và lãnh đạo ký chính thức (bước 3). Văn thư ký số cơ quan cuối cùng (bước 4). Danh sách được máy chủ lọc theo cơ quan và phòng ban.</p>
+    <p className="fine-note">Người soạn đã ký bước 1. Chọn trưởng hoặc phó trưởng đơn vị được phân quyền ký nháy (bước 2); chọn lãnh đạo trưởng hoặc cấp phó được phân quyền ký chính thức (bước 3). Văn thư ký số cơ quan cuối cùng (bước 4). Danh sách được máy chủ lọc theo cơ quan, phòng ban và vai trò.</p>
     {loading?<p>Đang tải danh sách người ký...</p>:<>
-      <label>{role==='TRUONG_VAN_PHONG'?'Trưởng văn phòng ký nháy':'Trưởng phòng ký nháy'}
+      <label>{role==='TRUONG_VAN_PHONG'?'Trưởng / phó trưởng văn phòng ký nháy':'Trưởng / phó trưởng phòng ký nháy'}
         <select value={reviewer} onChange={e=>setReviewer(Number(e.target.value))}>
-          {reviewers.map(p=><option key={p.MaNguoiDung} value={p.MaNguoiDung}>{p.HoTen} — {p.TenPhongBan}</option>)}
+          {reviewers.map(p=><option key={p.MaNguoiDung} value={p.MaNguoiDung}>{p.HoTen} — {p.VaiTroKy} — {p.TenPhongBan}</option>)}
         </select></label>
-      <label>Lãnh đạo ký chính thức
+      <label>Lãnh đạo trưởng / cấp phó ký chính thức
         <select value={leader} onChange={e=>setLeader(Number(e.target.value))}>
-          {leaders.map(p=><option key={p.MaNguoiDung} value={p.MaNguoiDung}>{p.HoTen} — {p.ChucVu}</option>)}
+          {leaders.map(p=><option key={p.MaNguoiDung} value={p.MaNguoiDung}>{p.HoTen} — {p.VaiTroKy}</option>)}
         </select></label>
       {(!reviewers.length||!leaders.length)&&<div className="form-error">Chưa có người ký phù hợp. Quản trị viên cần cấu hình trưởng đơn vị và lãnh đạo trước khi trình duyệt.</div>}
     </>}

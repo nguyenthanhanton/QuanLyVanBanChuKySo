@@ -58,22 +58,26 @@ public static class QuyTrinhEndpoints
             if(department==null)return Results.NotFound();
             var office=department is "VAN_THU" or "VAN_PHONG";
             var role=office?"TRUONG_VAN_PHONG":"TRUONG_PHONG";
+            var deputyRole=office?"PHO_VAN_PHONG":"PHO_PHONG";
             var leaders=await cn.QueryAsync(@"
-                SELECT DISTINCT u.MaNguoiDung,u.HoTen,u.ChucVu,p.TenPhongBan
+                SELECT DISTINCT u.MaNguoiDung,u.HoTen,u.ChucVu,p.TenPhongBan,
+                       r.TenVaiTro AS VaiTroKy
                 FROM dbo.NguoiDung u JOIN dbo.NguoiDungVaiTro uv ON uv.MaNguoiDung=u.MaNguoiDung
                   AND uv.MaCoQuan=u.MaCoQuan
                 JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
                 LEFT JOIN dbo.PhongBan p ON p.MaPhongBan=u.MaPhongBan
-                WHERE u.MaCoQuan=@agency AND u.DangHoatDong=1 AND r.MaDinhDanh='LANH_DAO'
+                WHERE u.MaCoQuan=@agency AND u.DangHoatDong=1
+                  AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO')
                 ORDER BY u.HoTen",new{agency=actor.MaCoQuan});
             var reviewers=await cn.QueryAsync(@"
-                SELECT DISTINCT u.MaNguoiDung,u.HoTen,u.ChucVu,p.TenPhongBan
+                SELECT DISTINCT u.MaNguoiDung,u.HoTen,u.ChucVu,p.TenPhongBan,
+                       r.TenVaiTro AS VaiTroKy
                 FROM dbo.NguoiDung u JOIN dbo.NguoiDungVaiTro uv ON uv.MaNguoiDung=u.MaNguoiDung
                   AND uv.MaCoQuan=u.MaCoQuan JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
                 LEFT JOIN dbo.PhongBan p ON p.MaPhongBan=u.MaPhongBan
-                WHERE u.MaCoQuan=@agency AND u.DangHoatDong=1 AND r.MaDinhDanh=@role
+                WHERE u.MaCoQuan=@agency AND u.DangHoatDong=1 AND r.MaDinhDanh IN (@role,@deputyRole)
                   AND (@office=1 OR p.MaDinhDanh=@department)
-                ORDER BY u.HoTen",new{agency=actor.MaCoQuan,role,office,department});
+                ORDER BY u.HoTen",new{agency=actor.MaCoQuan,role,deputyRole,office,department});
             return Results.Ok(new{nguoiKyNhay=reviewers,nguoiKyLanhDao=leaders,
                 vaiTroKyNhay=role,phongBanNguoiSoan=department});
         }).RequireAuthorization();
@@ -139,16 +143,17 @@ public static class QuyTrinhEndpoints
             if(department==null){tx.Rollback();return Results.Conflict(new{message="Người soạn chưa được phân phòng ban."});}
             var office=department is "VAN_THU" or "VAN_PHONG";
             var role=office?"TRUONG_VAN_PHONG":"TRUONG_PHONG";
+            var deputyRole=office?"PHO_VAN_PHONG":"PHO_PHONG";
             var authorized=await cn.ExecuteScalarAsync<int>(@"
-                SELECT COUNT(DISTINCT CASE WHEN u.MaNguoiDung=@reviewer AND r.MaDinhDanh=@role
+                SELECT COUNT(DISTINCT CASE WHEN u.MaNguoiDung=@reviewer AND r.MaDinhDanh IN (@role,@deputyRole)
                     AND (@office=1 OR p.MaDinhDanh=@department) THEN 1
-                    WHEN u.MaNguoiDung=@leader AND r.MaDinhDanh='LANH_DAO' THEN 2 END)
+                    WHEN u.MaNguoiDung=@leader AND r.MaDinhDanh IN ('LANH_DAO','PHO_LANH_DAO') THEN 2 END)
                 FROM dbo.NguoiDung u JOIN dbo.NguoiDungVaiTro uv ON uv.MaNguoiDung=u.MaNguoiDung
                   AND uv.MaCoQuan=u.MaCoQuan JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
                 LEFT JOIN dbo.PhongBan p ON p.MaPhongBan=u.MaPhongBan
                 WHERE u.MaCoQuan=@agency AND u.DangHoatDong=1 AND u.MaNguoiDung IN (@reviewer,@leader)",
                 new{agency=actor.MaCoQuan,reviewer=body.MaNguoiKyNhay,leader=body.MaNguoiKyLanhDao,
-                    role,office,department},tx);
+                    role,deputyRole,office,department},tx);
             if(body.MaNguoiKyNhay==body.MaNguoiKyLanhDao || authorized!=2){
                 tx.Rollback();return Results.BadRequest(new{message="Người ký được chọn không đúng vai trò hoặc phòng ban."});
             }

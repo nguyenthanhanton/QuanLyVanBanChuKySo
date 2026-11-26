@@ -400,9 +400,14 @@ public static class KySoEndpoints
             var command="KY_"+stage.Order;
             var old=await LayBienNhan(cn,tx,actor.MaCoQuan.Value,request.MaYeuCau,command);
             if(old!=null){tx.Commit();return Results.Content(old,"application/json");}
-            if(!await CoVaiTro(cn,tx,actor,stage.Role) &&
-               !(doc.SoBuocKy==4 && request.LoaiChuKy=="KY_NHAY" &&
-                 await CoVaiTro(cn,tx,actor,"TRUONG_VAN_PHONG"))){
+            var authorizedRole=await CoVaiTro(cn,tx,actor,stage.Role);
+            if(doc.SoBuocKy==4 && request.LoaiChuKy=="KY_NHAY")
+                authorizedRole=authorizedRole || await CoVaiTro(cn,tx,actor,"PHO_PHONG") ||
+                    await CoVaiTro(cn,tx,actor,"TRUONG_VAN_PHONG") ||
+                    await CoVaiTro(cn,tx,actor,"PHO_VAN_PHONG");
+            if(doc.SoBuocKy==4 && request.LoaiChuKy=="KY_LANH_DAO")
+                authorizedRole=authorizedRole || await CoVaiTro(cn,tx,actor,"PHO_LANH_DAO");
+            if(!authorizedRole){
                 tx.Rollback();return Results.Forbid();
             }
             if(doc.TrangThai!="CHO_DUYET"){
