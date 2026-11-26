@@ -145,3 +145,24 @@
 .admin-delegation-history-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .admin-delegation-history-head>span{color:#1e62a6;background:#ecf5ff;border-radius:20px;padding:3px 10px;font-size:12px}
 .admin-delegation-history-row p{margin:7px 0;color:#516680;line-height:1.5}
+.monitor-panel{margin-top:18px;overflow:hidden}
+.monitor-table-wrap{width:100%;overflow-x:auto}
+.monitor-table-wrap table{width:100%;border-collapse:collapse;min-width:760px;font-size:13px}
+.monitor-table-wrap th,.monitor-table-wrap td{text-align:left;padding:13px 16px;border-bottom:1px solid #e6edf5;vertical-align:top}
+.monitor-table-wrap th{background:#f7faff;color:#7890ad;font-weight:700}
+.monitor-table-wrap td small{display:block;margin-top:5px;color:#8395ae}
+.monitor-panel .panel-head{gap:12px;flex-wrap:wrap}
+.monitor-panel .panel-head label{display:flex;align-items:center;gap:10px}
+.monitor-panel .panel-head select{min-width:150px}
+.monitor-link{display:block;border:0;background:transparent;padding:0;color:#1b5fa4;text-align:left;font-weight:700;cursor:pointer}
+.deadline-pill{font-size:12px;border-radius:18px;padding:5px 9px;background:#edf3fa;color:#61758d;white-space:nowrap}
+.deadline-pill.QUA_HAN{background:#fdecec;color:#b62f38}
+.deadline-pill.SAP_DEN_HAN{background:#fff0d8;color:#a56a0e}
+.deadline-pill.TRONG_HAN,.deadline-pill.HOAN_THANH{background:#e4f7ee;color:#187c52}
+.notification-popup{position:absolute;z-index:40;right:190px;top:70px;width:min(400px,calc(100vw - 24px));max-height:440px;overflow-y:auto;background:white;box-shadow:0 16px 44px #122c4a33;border:1px solid #dce6f3;border-radius:14px;padding:14px}
+.notification-popup h3{font-size:15px;margin:4px 10px 10px}
+.notification-popup button{display:block;width:100%;text-align:left;padding:12px 10px;border:0;border-top:1px solid #edf1f7;background:#f1f7ff;cursor:pointer;color:#13385e}
+.notification-popup button.read{background:white;opacity:.75}
+.notification-popup button small{display:block;margin-top:5px;color:#71849e}
+.notification-popup p{padding:10px;color:#7487a0}
+@media(max-width:700px){.notification-popup{right:12px;top:62px}}
