@@ -34,14 +34,14 @@ const navigation: Navigation = [
     { id:'bao-cao',label:'Báo cáo thống kê',icon:Activity,permission:'reports.read' },
   ] },
   { group: 'QUẢN TRỊ', items: [
-    { id:'quan-tri',label:'Quản trị hệ thống',icon:Settings2,permission:'agency.admins.manage' },
+    { id:'quan-tri',label:'Quản trị tài khoản',icon:Settings2,permission:'users.manage' },
   ] },
 ];
 
 const names: Record<Trang, string> = {
   'tong-quan':'Tổng quan', 'van-ban-di':'Quản lý văn bản đi', 'van-ban-den':'Quản lý văn bản đến',
   'cong-viec':'Việc cần xử lý', 'hanh-trinh':'Hành trình văn bản', 'giao-nhan':'Theo dõi giao nhận',
-  'ho-so':'Hồ sơ lưu trữ', 'bao-cao':'Báo cáo thống kê', 'quan-tri':'Quản trị hệ thống'
+  'ho-so':'Hồ sơ lưu trữ', 'bao-cao':'Báo cáo thống kê', 'quan-tri':'Quản trị tài khoản'
 };
 
 function defaultDocs(): VanBan[] {
@@ -552,6 +552,86 @@ function DraftAttachmentEditor({doc,actor,token,onUpdated}:{doc:VanBan;actor:Act
 
 type SigningChoice={maNguoiKyNhay:number;maNguoiKyLanhDao:number};
 type SignerOption={MaNguoiDung:number;HoTen:string;ChucVu:string;TenPhongBan:string;VaiTroKy:string};
+
+type AdminUser={MaNguoiDung:number;TenDangNhap:string;HoTen:string;TenPhongBan:string;
+  MaPhongBan:number;MaVaiTro:string;DangHoatDong:boolean};
+type AdminOption={MaDinhDanh?:string;TenVaiTro?:string;MaPhongBan?:number;TenPhongBan?:string};
+function UserAdministration({token,username}:{token:string;username:string}){
+  const [users,setUsers]=useState<AdminUser[]>([]);
+  const [departments,setDepartments]=useState<AdminOption[]>([]);
+  const [roles,setRoles]=useState<AdminOption[]>([]);
+  const [name,setName]=useState('');const [login,setLogin]=useState('');
+  const [password,setPassword]=useState('');const [department,setDepartment]=useState(0);
+  const [role,setRole]=useState('CHUYEN_VIEN');
+  const [edits,setEdits]=useState<Record<number,{department:number;role:string}>>({});
+  const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [message,setMessage]=useState('');
+  const load=async()=>{
+    const [options,accounts]=await Promise.all([
+      requestApi('/admin/options',token),requestApi('/admin/users',token)
+    ]);
+    const ds=(field(options,'phongBan') as Record<string,unknown>[]).map(x=>({
+      MaPhongBan:Number(field(x,'MaPhongBan')),TenPhongBan:String(field(x,'TenPhongBan'))}));
+    const rs=(field(options,'vaiTro') as Record<string,unknown>[]).map(x=>({
+      MaDinhDanh:String(field(x,'MaDinhDanh')),TenVaiTro:String(field(x,'TenVaiTro'))}));
+    const us=(accounts as Record<string,unknown>[]).map(x=>({
+      MaNguoiDung:Number(field(x,'MaNguoiDung')),TenDangNhap:String(field(x,'TenDangNhap')),
+      HoTen:String(field(x,'HoTen')),TenPhongBan:String(field(x,'TenPhongBan')??''),
+      MaPhongBan:Number(field(x,'MaPhongBan')??0),MaVaiTro:String(field(x,'MaVaiTro')??''),
+      DangHoatDong:Boolean(field(x,'DangHoatDong'))}));
+    setDepartments(ds);setRoles(rs);setUsers(us);
+    setDepartment(current=>current||ds[0]?.MaPhongBan||0);
+    setEdits(Object.fromEntries(us.map(u=>[u.MaNguoiDung,{department:u.MaPhongBan,role:u.MaVaiTro}])));
+  };
+  useEffect(()=>{load().catch(e=>setError((e as Error).message));},[token]);
+  const action=async(fn:()=>Promise<unknown>,success:string)=>{
+    setBusy(true);setError('');setMessage('');
+    try{await fn();await load();setMessage(success);}catch(e){setError((e as Error).message);}finally{setBusy(false);}
+  };
+  return <div className="user-admin">
+    <section className="panel admin-create"><h3>Thêm tài khoản vào cơ quan</h3>
+      <p className="subtle">Chỉ quản trị viên cơ quan được tạo tài khoản. Mật khẩu không được đưa vào GitHub hay nhật ký.</p>
+      <form onSubmit={e=>{e.preventDefault();action(async()=>{
+        await requestApi('/admin/users',token,{method:'POST',body:JSON.stringify({
+          tenDangNhap:login,hoTen:name,matKhau:password,maPhongBan:department,maVaiTro:role})});
+        setPassword('');setLogin('');setName('');
+      },'Đã tạo tài khoản. Hãy hướng dẫn người dùng đổi mật khẩu sau lần đăng nhập đầu.');}}>
+        <div className="form-grid">
+          <label>Tên đăng nhập<input value={login} onChange={e=>setLogin(e.target.value)} required placeholder="vd: phophong_a"/></label>
+          <label>Họ tên<input value={name} onChange={e=>setName(e.target.value)} required/></label>
+          <label>Mật khẩu ban đầu (ít nhất 12 ký tự)<input type="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={12} required autoComplete="new-password"/></label>
+          <label>Phòng ban<select value={department} onChange={e=>setDepartment(Number(e.target.value))}>
+            {departments.map(d=><option key={d.MaPhongBan} value={d.MaPhongBan}>{d.TenPhongBan}</option>)}
+          </select></label>
+          <label>Vai trò<select value={role} onChange={e=>setRole(e.target.value)}>
+            {roles.map(r=><option key={r.MaDinhDanh} value={r.MaDinhDanh}>{r.TenVaiTro}</option>)}
+          </select></label>
+        </div>
+        <button className="primary" type="submit" disabled={busy||!department||!role||password.length<12}><Plus size={16}/> Tạo tài khoản</button>
+      </form></section>
+    <section className="panel admin-users-list"><div className="panel-head"><div><h3>Người dùng trong cơ quan</h3><p>{users.length} tài khoản</p></div>
+      <button className="secondary small" disabled={busy} onClick={()=>load().catch(e=>setError((e as Error).message))}><RefreshCw size={15}/> Tải lại</button></div>
+      {users.map(u=>{const edit=edits[u.MaNguoiDung]??{department:u.MaPhongBan,role:u.MaVaiTro};
+        const own=u.TenDangNhap===username;const protectedUser=u.MaVaiTro==='AGENCY_ADMIN'||own;
+        return <div className="admin-user-row" key={u.MaNguoiDung}>
+          <div><strong>{u.HoTen}</strong><small>{u.TenDangNhap} · {u.TenPhongBan}</small>
+            <span className={u.DangHoatDong?'success-note':'form-error'}>{u.DangHoatDong?'Đang hoạt động':'Đã khóa'}</span></div>
+          <label>Phòng ban<select disabled={busy||protectedUser} value={edit.department} onChange={e=>setEdits(s=>({...s,[u.MaNguoiDung]:{...edit,department:Number(e.target.value)}}))}>
+            {departments.map(d=><option key={d.MaPhongBan} value={d.MaPhongBan}>{d.TenPhongBan}</option>)}
+          </select></label>
+          <label>Vai trò<select disabled={busy||protectedUser} value={edit.role} onChange={e=>setEdits(s=>({...s,[u.MaNguoiDung]:{...edit,role:e.target.value}}))}>
+            {protectedUser&&<option value={u.MaVaiTro}>{u.MaVaiTro}</option>}
+            {roles.map(r=><option key={r.MaDinhDanh} value={r.MaDinhDanh}>{r.TenVaiTro}</option>)}
+          </select></label>
+          <div className="admin-user-actions"><button className="secondary small" disabled={busy||protectedUser||!edit.department||!edit.role}
+            onClick={()=>action(()=>requestApi(`/admin/users/${u.MaNguoiDung}/assignment`,token,{method:'PUT',body:JSON.stringify({maPhongBan:edit.department,maVaiTro:edit.role})}),'Đã cập nhật phân công.')}>Lưu phân công</button>
+            <button className="secondary small" disabled={busy||protectedUser}
+              onClick={()=>action(()=>requestApi(`/admin/users/${u.MaNguoiDung}/status`,token,{method:'PUT',body:JSON.stringify({dangHoatDong:!u.DangHoatDong})}),u.DangHoatDong?'Đã khóa tài khoản.':'Đã mở tài khoản.')}>{u.DangHoatDong?'Khóa':'Mở khóa'}</button></div>
+        </div>;})}
+    </section>
+    {error&&<div className="form-error">{error}</div>}{message&&<p className="success-note">{message}</p>}
+  </div>;
+}
+
 function SignerPicker({doc,token,onClose,onSubmit}:{doc:VanBan;token:string;onClose:()=>void;
   onSubmit:(choice:SigningChoice)=>void}){
   const [leaderDraft,setLeaderDraft]=useState(false);
@@ -1058,11 +1138,10 @@ export default function App() {
           ['Lượt giao nhận',totalTransfer]
         ].map(([label,value])=><div className="panel report-item" key={label}><span>{label}</span><strong>{value}</strong><div className="report-bar"/></div>)}</div></>}
 
-      {page==='quan-tri'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ NỀN TẢNG</div><h1>Quản trị hệ thống</h1>
-        <p>Quản lý cơ quan và tài khoản. Tài khoản quản trị không mặc nhiên xem nội dung văn bản.</p></div></div>
-        <div className="admin-grid"><div className="panel admin-tile"><Building2 size={28}/><h3>Quản lý cơ quan</h3><p>Cơ quan A, B, C hoạt động độc lập với sổ và quyền riêng.</p><span>Chức năng quản trị chi tiết đang phát triển</span></div>
-          <div className="panel admin-tile"><Users size={28}/><h3>Người dùng</h3><p>Quản lý tài khoản, vai trò quản trị, khóa tài khoản.</p><span>Không có quyền tự cấp nghiệp vụ</span></div>
-          <div className="panel admin-tile"><ShieldCheck size={28}/><h3>Bảo vệ tài liệu</h3><p>Mọi API cần kiểm tra quyền và phạm vi dữ liệu.</p><span>Thiết kế mặc định từ chối khi thiếu quyền</span></div></div></>}
+      {page==='quan-tri'&&<><div className="page-intro compact"><div><div className="overline">QUẢN TRỊ CƠ QUAN · 0.6.1</div><h1>Quản trị tài khoản</h1>
+        <p>Tạo và quản lý tài khoản, phòng ban, chức vụ trong phạm vi cơ quan. Quản trị viên không mặc nhiên được xem văn bản nghiệp vụ.</p></div></div>
+        {!DEMO?<UserAdministration token={token} username={actor.username}/>:
+          <div className="panel">Chức năng quản trị tài khoản chỉ sử dụng khi kết nối API thật.</div>}</>}
     </div>
     </main>
     {currentDoc&&<DocumentDetails key={currentDoc.id} doc={currentDoc} onClose={()=>setSelected(null)} onAction={action} allowed={actor}

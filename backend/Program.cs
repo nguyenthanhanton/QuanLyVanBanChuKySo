@@ -45,4 +45,5 @@ app.MapTepVanBan();
 app.MapQuyTrinh();
 app.MapKySo();
 app.MapPhatHanh();
+app.MapQuanTriNguoiDung();
 app.Run();
