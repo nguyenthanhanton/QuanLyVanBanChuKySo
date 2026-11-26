@@ -39,12 +39,44 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
   const [reassignOpen,setReassignOpen]=useState(false);
   const [evidence,setEvidence]=useState<Evidence[]>([]);
   const [evidenceFile,setEvidenceFile]=useState<File|null>(null);
+  const [localEvidencePreview,setLocalEvidencePreview]=useState('');
+  const [savedEvidencePreviews,setSavedEvidencePreviews]=useState<Record<string,string>>({});
   const [pdfUrl,setPdfUrl]=useState('');
   const [page,setPage]=useState(1);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [error,setError]=useState('');
   useEffect(()=>()=>{if(pdfUrl)URL.revokeObjectURL(pdfUrl);},[pdfUrl]);
+  useEffect(()=>{
+    if(!evidenceFile){setLocalEvidencePreview('');return;}
+    if(!['image/png','image/jpeg','image/webp'].includes(evidenceFile.type)){
+      setError('Chỉ chọn ảnh PNG, JPG hoặc WEBP.');setEvidenceFile(null);return;
+    }
+    const url=URL.createObjectURL(evidenceFile);
+    setLocalEvidencePreview(url);
+    return ()=>URL.revokeObjectURL(url);
+  },[evidenceFile]);
+  useEffect(()=>{
+    let active=true;
+    const generated:string[]=[];
+    setSavedEvidencePreviews({});
+    if(!selected||!evidence.length)return;
+    (async()=>{
+      const images:Record<string,string>={};
+      for(const file of evidence){
+        try{
+          const response=await fetch(`/api/v1/incoming-work/${selected}/evidence/${file.maMinhChung}`,{
+            headers:{Authorization:`Bearer ${token}`}});
+          if(!response.ok)continue;
+          const url=URL.createObjectURL(await response.blob());
+          generated.push(url);images[file.maMinhChung]=url;
+        }catch{/* từng ảnh có thể tạm thời không truy cập được */}
+      }
+      if(active)setSavedEvidencePreviews(images);
+      else generated.forEach(url=>URL.revokeObjectURL(url));
+    })();
+    return ()=>{active=false;generated.forEach(url=>URL.revokeObjectURL(url));};
+  },[evidence,selected,token]);
   const api=async(path:string,body?:object):Promise<any>=>{
     const response=await fetch('/api/v1/incoming-work'+path,{method:body?'POST':'GET',
       headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
@@ -209,9 +241,14 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
         {reports.map(r=><div className="incoming-work-report" key={r.maPhongBan}><strong>{r.tenPhongBan} — {r.nguoiBaoCao}</strong>
           <p>{r.noiDung}</p></div>)}
         {reports.length===0&&<p className="subtle">Chưa có báo cáo từ các phòng.</p>}
-        {evidence.length>0&&<div className="incoming-work-report"><strong>Ảnh minh chứng</strong>
-          {evidence.map(file=><p key={file.maMinhChung}>{file.tenTep} — {file.nguoiTaiLen} {' '}
-            <button className="secondary small" onClick={()=>viewEvidence(file.maMinhChung,file.tenTep)}>Xem ảnh</button></p>)}
+        {evidence.length>0&&<div className="incoming-work-report"><strong>Ảnh minh chứng đã lưu</strong>
+          <div className="incoming-evidence-grid">{evidence.map(file=><div key={file.maMinhChung} className="incoming-evidence-card">
+            {savedEvidencePreviews[file.maMinhChung]
+              ?<img src={savedEvidencePreviews[file.maMinhChung]} alt={file.tenTep}/>
+              :<span className="subtle">Đang tải ảnh...</span>}
+            <small>{file.tenTep} — {file.nguoiTaiLen}</small>
+            <button className="secondary small" onClick={()=>viewEvidence(file.maMinhChung,file.tenTep)}>Xem lớn</button>
+          </div>)}</div>
         </div>}
         {picked.trangThaiXuLy==='DANG_XU_LY'&&<div className="incoming-work-form">
           <label>Kết quả thực hiện (chỉ cá nhân chủ trì được phân công mới gửi được)
@@ -221,7 +258,10 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
           {people?.canReport&&reports.some(report=>report.maPhongBan===people.actorDepartment)&&<div>
             <label>Đính kèm ảnh minh chứng (PNG/JPG/WEBP, tối đa 5 MB/ảnh)
               <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>setEvidenceFile(e.target.files?.[0]??null)}/></label>
-            <button className="secondary small" disabled={busy||!evidenceFile} onClick={uploadEvidence}>Tải ảnh minh chứng</button>
+            {localEvidencePreview&&<div className="incoming-evidence-selection"><img src={localEvidencePreview} alt="Ảnh minh chứng chuẩn bị tải lên"/>
+              <small>Xem trước: {evidenceFile?.name} — Chưa lưu lên máy chủ</small></div>}
+            <button className="secondary small" disabled={busy||!evidenceFile} onClick={uploadEvidence}>
+              {busy?'Đang tải ảnh...':'Tải ảnh minh chứng'}</button>
           </div>}
           {data.leader&&<button className="primary small" disabled={busy||!result.trim()||picked.soBaoCao===0}
             onClick={()=>submit(`/${selected}/complete`,{ketQuaTongHop:result})}>Kết thúc xử lý (Kết luận cấp trên)</button>}
