@@ -228,6 +228,7 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
   const [certName,setCertName]=useState('');
   const [certType,setCertType]=useState('CA_NHAN');
   const [testCert,setTestCert]=useState(false);
+  const [replaceTestCert,setReplaceTestCert]=useState(false);
   const [pfxFile,setPfxFile]=useState<File>();
   const [signatureImage,setSignatureImage]=useState<File>();
   const [signaturePage,setSignaturePage]=useState(1);
@@ -308,13 +309,16 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
     try {
       if(!accountPassword)throw new Error('Nhập mật khẩu tài khoản để xác nhận.');
       if(!testCert&&!pfxFile)throw new Error('Chọn tệp PFX/P12 của bạn.');
+      if(replaceTestCert&&!testCert)throw new Error('Chỉ được thay chứng thư tự ký thử nghiệm.');
       const form=new FormData();form.set('loaiChungThu',certType);form.set('tenChungThu',certName);
       form.set('matKhau',accountPassword);form.set('matKhauPfx',pfxPassword);
+      form.set('thayTheChungThuThuNghiem',String(replaceTestCert));
       form.set('thuNghiem',String(testCert));if(pfxFile)form.set('tepPfx',pfxFile);
       const result=await requestApi('/signing-credentials',token,{method:'POST',body:form});
-      setMessage((result.noiBoThuNghiem?'Đã tạo chứng thư thử nghiệm nội bộ.':'Đã nhập chứng thư;')+
+      setMessage((result.daThayThe?'Đã lưu chứng thư thử nghiệm mới; chứng thư cũ vẫn được giữ để tra cứu.':
+        result.noiBoThuNghiem?'Đã tạo chứng thư thử nghiệm nội bộ.':'Đã nhập chứng thư;')+
         ' Hệ thống chưa thẩm định chuỗi CA/thu hồi.');
-      setAccountPassword('');setPfxPassword('');setPfxFile(undefined);
+      setAccountPassword('');setPfxPassword('');setPfxFile(undefined);setReplaceTestCert(false);
       setCredentials(await requestApi('/signing-credentials',token));
     }catch(err){setMessage((err as Error).message);}finally{setBusy(false);}
   };
@@ -332,6 +336,9 @@ function SignaturePanel({doc,actor,token,onUpdated,taskStep}:{doc:VanBan;actor:A
         <label>Tên chứng thư<input value={certName} onChange={e=>setCertName(e.target.value)} placeholder="Tên cá nhân / cơ quan"/></label></div>
       <label className="form-check"><input type="checkbox" checked={testCert} onChange={e=>setTestCert(e.target.checked)}/>
         Tạo chứng thư tự ký để thử nghiệm (không được coi là chữ ký số được CA công nhận)</label>
+      {testCert&&activeCreds.some(c=>String(field(c,'LoaiChungThu'))===certType)&&
+        <label className="form-check"><input type="checkbox" checked={replaceTestCert} onChange={e=>setReplaceTestCert(e.target.checked)}/>
+          Thay thế chứng thư thử nghiệm cũ (không xóa chứng thư cũ hoặc PDF đã ký)</label>}
       {!testCert&&<><label>Nhập chứng thư PFX/P12<input type="file" accept=".pfx,.p12" onChange={e=>setPfxFile(e.target.files?.[0])}/></label>
         <label>Mật khẩu tệp PFX<input type="password" value={pfxPassword} onChange={e=>setPfxPassword(e.target.value)}/></label></>}
       <label>Mật khẩu tài khoản để ký / nhập chứng thư<input type="password" value={accountPassword} onChange={e=>setAccountPassword(e.target.value)}/></label>

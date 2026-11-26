@@ -146,6 +146,7 @@ public static class KySoEndpoints
             var form=await http.Request.ReadFormAsync();
             var type=form["loaiChungThu"].ToString();
             var test=form["thuNghiem"].ToString()=="true";
+            var replaceTest=form["thayTheChungThuThuNghiem"].ToString()=="true";
             var name=form["tenChungThu"].ToString().Trim();
             var password=form["matKhau"].ToString();
             var file=form.Files.GetFile("tepPfx");
@@ -163,12 +164,20 @@ public static class KySoEndpoints
                 tx.Rollback();return Results.BadRequest(new{message="Xác nhận mật khẩu tài khoản không đúng."});
             }
             int? owner=type=="CA_NHAN"?actor.MaNguoiDung:null;
-            var active=await cn.ExecuteScalarAsync<int>(@"
-                SELECT COUNT(1) FROM dbo.ChungThuKy WITH(UPDLOCK,HOLDLOCK)
+            var active=await cn.QuerySingleOrDefaultAsync<ChungThuLuu>(@"
+                SELECT TOP 1 MaChungThu,NguonChungThu FROM dbo.ChungThuKy WITH(UPDLOCK,HOLDLOCK)
                 WHERE MaCoQuan=@agency AND LoaiChungThu=@type AND DangHoatDong=1
                   AND ((MaNguoiSoHuu=@owner) OR (MaNguoiSoHuu IS NULL AND @owner IS NULL))",
                 new{agency=actor.MaCoQuan,type,owner},tx);
-            if(active>0){tx.Rollback();return Results.Conflict(new{message="Đã có chứng thư đang hoạt động. Cần quy trình thu hồi/thay thế riêng."});}
+            if(replaceTest && !test){tx.Rollback();return Results.BadRequest(new{message="Chỉ được thay thế bằng chứng thư tự ký thử nghiệm."});}
+            if(active!=null && (!replaceTest || active.NguonChungThu!="TU_KY_THU_NGHIEM")){
+                tx.Rollback();return Results.Conflict(new{message=active.NguonChungThu=="TU_KY_THU_NGHIEM"
+                    ?"Đã có chứng thư thử nghiệm đang hoạt động. Chọn 'Thay thế chứng thư thử nghiệm cũ' để tạo mới."
+                    :"Chứng thư PFX đang hoạt động không thể thay thế bằng chức năng thử nghiệm."});
+            }
+            if(replaceTest && active==null){
+                tx.Rollback();return Results.BadRequest(new{message="Không có chứng thư thử nghiệm đang hoạt động để thay thế."});
+            }
             var certId=Guid.NewGuid();
             DichVuKyPdf.ChungThuMoi cert;
             try {
@@ -183,6 +192,12 @@ public static class KySoEndpoints
                 tx.Rollback();return Results.BadRequest(new{message="Không thể tạo/nhập chứng thư: "+ex.Message});
             }
             try {
+                if(replaceTest){
+                    await cn.ExecuteAsync(@"
+                        UPDATE dbo.ChungThuKy SET DangHoatDong=0
+                        WHERE MaChungThu=@oldId AND MaCoQuan=@agency AND DangHoatDong=1",
+                        new{oldId=active!.MaChungThu,agency=actor.MaCoQuan},tx);
+                }
                 await cn.ExecuteAsync(@"
                     INSERT dbo.ChungThuKy(MaChungThu,MaCoQuan,MaNguoiSoHuu,LoaiChungThu,NguonChungThu,TenChungThu,
                         SoSerial,ChungThuCongKhai,DuongDanKhoaMaHoa,MaKhoaMaHoa,NgayHieuLuc,NgayHetHan)
@@ -191,9 +206,18 @@ public static class KySoEndpoints
                         publicCert=cert.ChungThuCongKhai,path=cert.DuongDanKhoaMaHoa,
                         keyId=signer.MaKhoa(),source=test?"TU_KY_THU_NGHIEM":"NHAP_PFX",
                         start=cert.NgayHieuLuc,end=cert.NgayHetHan},tx);
+                await cn.ExecuteAsync(@"
+                    INSERT dbo.NhatKyHeThong(MaCoQuan,MaNguoiDung,LoaiNhatKy,HanhDong,MoTa)
+                    VALUES(@agency,@user,'NGHIEP_VU',@action,@description)",
+                    new{agency=actor.MaCoQuan,user=actor.MaNguoiDung,
+                        action=replaceTest?"THAY_CHUNG_THU_THU_NGHIEM":"TAO_CHUNG_THU",
+                        description=replaceTest
+                            ?$"Thay chứng thư thử nghiệm {active!.MaChungThu} bằng {certId}; giữ hồ sơ cũ."
+                            :$"Tạo/nhập chứng thư {certId} ({type})."},tx);
                 tx.Commit();
                 return Results.Created("/api/v1/signing-credentials",new{
                     maChungThu=certId,loaiChungThu=type,noiBoThuNghiem=test,
+                    daThayThe=replaceTest,maChungThuCu=replaceTest?active!.MaChungThu:(Guid?)null,
                     mucDoTinCay=test?"INTERNAL_SELF_SIGNED":"CHUA_THAM_DINH_CA",
                     ngayHetHan=cert.NgayHetHan});
             } catch {tx.Rollback();File.Delete(cert.DuongDanKhoaMaHoa);throw;}
