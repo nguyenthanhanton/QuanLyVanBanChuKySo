@@ -54,4 +54,5 @@ app.MapHoSo();
 app.MapNopLuu();
 app.MapLuuTruNangCao();
 app.MapDieuHanhVanBanDen();
+app.MapViecCaNhan();
 app.Run();
