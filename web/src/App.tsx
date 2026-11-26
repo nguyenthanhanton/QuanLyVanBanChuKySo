@@ -1141,6 +1141,7 @@ export default function App() {
   const [monitorReports,setMonitorReports]=useState<MonitorReport[]>([]);
   const [notifications,setNotifications]=useState<MonitorNotification[]>([]);
   const [notificationOpen,setNotificationOpen]=useState(false);
+  const [incomingFocus,setIncomingFocus]=useState('');
   const [monitorFilter,setMonitorFilter]=useState('ALL');
   const [documentPage,setDocumentPage]=useState(1);
   const [taskPage,setTaskPage]=useState(1);
@@ -1152,15 +1153,23 @@ export default function App() {
   useEffect(()=>{setDocumentPage(1);setTaskPage(1);setJourneyPage(1);setDeliveryPage(1);
     setMonitorPage(1);setReportPage(1);},[page,query,filter]);
   useEffect(()=>{if(DEMO||!token)return;
-    requestApi('/monitor/notifications',token).then(setNotifications).catch(()=>{});
-    requestApi('/monitor/tasks',token).then(setMonitorTasks).catch(()=>{});
+    let active=true;
+    const poll=()=>{
+      requestApi('/monitor/notifications',token).then((rows:MonitorNotification[])=>{if(active)setNotifications(rows);}).catch(()=>{});
+      requestApi('/monitor/tasks',token).then((rows:MonitorTask[])=>{if(active)setMonitorTasks(rows);}).catch(()=>{});
+    };
+    poll();const interval=window.setInterval(poll,60000);
+    window.addEventListener('focus',poll);
+    return()=>{active=false;window.clearInterval(interval);window.removeEventListener('focus',poll);};
   },[token]);
   const [agencyOptions,setAgencyOptions]=useState<{value:string;label:string}[]>(DEMO?[{value:'Cơ quan B',label:'Cơ quan B'},{value:'Cơ quan C',label:'Cơ quan C'}]:[]);
   const [error,setError]=useState('');
 
   useEffect(()=>{if(DEMO)localStorage.setItem(storedDocsKey,JSON.stringify(docs));},[docs]);
 
-  const menuItems=useMemo(()=>navigation.flatMap(g=>g.items).filter(i=>isAllowed(actor,i.permission)),[actor]);
+  const canNavigate=(permission:string,id:Trang)=>isAllowed(actor,permission)||
+    (id==='van-ban-den'&&(isAllowed(actor,'workflow.queue')||isAllowed(actor,'documents.read')));
+  const menuItems=useMemo(()=>navigation.flatMap(g=>g.items).filter(i=>canNavigate(i.permission,i.id)),[actor]);
   const visibleDocs=useMemo(()=>getAccessibleDocs(docs,actor),[docs,actor]);
   const filtered=useMemo(()=>visibleDocs.filter(d=>{
     if(page==='van-ban-di'&&d.type!=='DI')return false;
@@ -1280,6 +1289,9 @@ export default function App() {
       loaiThongBao:n.LoaiThongBao,maThamChieu:n.MaThamChieu})});
       setNotifications(old=>old.map(x=>x.MaThamChieu===n.MaThamChieu&&x.LoaiThongBao===n.LoaiThongBao?{...x,DaDoc:true}:x));
       setNotificationOpen(false);
+      if(n.LoaiThongBao.startsWith('DEN_')){
+        setIncomingFocus(n.MaVanBan);setPage('van-ban-den');setSelected(null);return;
+      }
       await openMonitoredDocument(n.MaVanBan);
     }catch(err){setError((err as Error).message);}
   };
@@ -1303,7 +1315,7 @@ export default function App() {
   };
 
   const logout=()=>{setActor(null);setToken('');setSelected(null);setQuery('');setProfileMenu(false);setError('');};
-  const go=(next:Trang)=>{if(!menuItems.find(i=>i.id===next))return;setPage(next);setSelected(null);setFilter('ALL');setQuery('');setMenuOpen(false);};
+  const go=(next:Trang)=>{if(!menuItems.find(i=>i.id===next))return;setPage(next);setSelected(null);setIncomingFocus('');setFilter('ALL');setQuery('');setMenuOpen(false);};
   const create=async(input:{title:string;excerpt:string;to:string[];urgency:VanBan['urgency'];mainFile:File;files:File[]})=>{
     if(!actor)return;
     if(DEMO){
@@ -1398,7 +1410,7 @@ export default function App() {
       <div className="brand"><div className="brand-symbol"><Files size={25}/></div><div><strong>VĂN THƯ SỐ</strong><span>QUẢN LÝ VĂN BẢN</span></div></div>
       <div className="agency-card"><div className="agency-icon"><Building2 size={19}/></div><div><span>Đơn vị đang làm việc</span><strong>{actor.agency}</strong></div><ChevronDown size={15}/></div>
       <nav>{navigation.map(group=>{
-        const items=group.items.filter(i=>isAllowed(actor,i.permission));
+        const items=group.items.filter(i=>canNavigate(i.permission,i.id));
         return items.length>0&&<div className="nav-group" key={group.group}><div className="nav-heading">{group.group}</div>
           {items.map(item=><button key={item.id} className={`nav-item ${page===item.id?'active':''}`} onClick={()=>go(item.id)}>
             <item.icon size={20} strokeWidth={1.85}/><span>{item.label}</span>{page===item.id&&<span className="nav-active-bar"/>}</button>)}
@@ -1416,8 +1428,10 @@ export default function App() {
       <div className="header-right">
         {hasDocs&&<div className="global-search"><Search size={19}/><input aria-label="Tìm kiếm văn bản" placeholder="Tìm văn bản, số ký hiệu..." value={query} onChange={e=>setQuery(e.target.value)}/>
           <span>⌘ K</span></div>}
-        <button className="icon-button notification-button" title="Thông báo" onClick={()=>setNotificationOpen(x=>!x)}>
-          <Bell size={20}/>{notifications.some(n=>!n.DaDoc)&&<span className="notification-dot"/>}</button>
+        <button className="icon-button notification-button" title="Thông báo" aria-label={`Thông báo, ${notifications.filter(n=>!n.DaDoc).length} chưa đọc`}
+          onClick={()=>{setNotificationOpen(x=>!x);setNotificationPage(1);
+            if(!DEMO&&token)void requestApi('/monitor/notifications',token).then(setNotifications).catch(()=>{});}}>
+          <Bell size={20}/>{notifications.some(n=>!n.DaDoc)&&<span className="notification-count">{Math.min(99,notifications.filter(n=>!n.DaDoc).length)}</span>}</button>
         {notificationOpen&&<div className="notification-popup"><h3>Thông báo của tôi</h3>
           {pageRows(notifications,notificationPage).map(n=><button key={`${n.LoaiThongBao}-${n.MaThamChieu}`}
             className={n.DaDoc?'read':''} onClick={()=>void markNotification(n)}>
@@ -1475,7 +1489,7 @@ export default function App() {
           {page==='van-ban-di'&&isAllowed(actor,'documents.manage')&&<button className="primary" onClick={()=>setCreateOpen(true)}><Plus size={18}/>Tạo văn bản mới</button>}</div>
         <div className="mini-stats"><span><Files size={17}/>Tổng: <strong>{filtered.length}</strong></span><span><Clock3 size={17}/>Đang xử lý: <strong>{filtered.filter(d=>d.status!=='HOAN_THANH').length}</strong></span><span><CheckCircle2 size={17}/>Hoàn thành: <strong>{filtered.filter(d=>d.status==='HOAN_THANH').length}</strong></span></div>
         {!DEMO&&page==='van-ban-den'?<>
-          <DieuHanhVanBanDenPanel token={token} onUpdated={updateAfterOperation}/>
+          <DieuHanhVanBanDenPanel token={token} onUpdated={updateAfterOperation} focusId={incomingFocus}/>
           {actor?.capabilities.includes('incoming.manage')&&<LiveDeliveries token={token} direction="in" onUpdated={updateAfterOperation}/>}
         </>:
           documentList(page==='van-ban-di'?'Danh sách văn bản đi':'Danh sách văn bản đến')}
