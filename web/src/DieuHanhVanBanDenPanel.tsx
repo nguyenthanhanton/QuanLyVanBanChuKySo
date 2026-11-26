@@ -23,7 +23,7 @@ const normalizeKeys=(value:unknown):unknown=>{
   return value;
 };
 
-export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;onUpdated:()=>Promise<void>}){
+export default function DieuHanhVanBanDenPanel({token,onUpdated,focusId}:{token:string;onUpdated:()=>Promise<void>;focusId?:string}){
   const [data,setData]=useState<Inbox>(empty);
   const [selected,setSelected]=useState('');
   const [lead,setLead]=useState('');
@@ -100,6 +100,13 @@ export default function DieuHanhVanBanDenPanel({token,onUpdated}:{token:string;o
     }
       catch(e){setError((e as Error).message);}
   };
+  useEffect(()=>{
+    if(!focusId||selected===focusId)return;
+    const index=data.rows.findIndex(row=>row.maVanBanDen===focusId);
+    if(index<0)return;
+    setPage(Math.floor(index/15)+1);
+    void choose(data.rows[index]);
+  },[focusId,data.rows,selected]);
   const submit=async(path:string,body:object={})=>{
     setBusy(true);setError('');setMessage('');
     try{const response=await api(path,body);setMessage(response.message??'Đã cập nhật.');
