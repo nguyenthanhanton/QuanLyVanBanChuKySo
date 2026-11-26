@@ -107,7 +107,10 @@ public static class XacThucEndpoints
 
         group.MapGet("/me", async (HttpContext http, PhanQuyen permissions) => {
             var actor = await permissions.NguoiHienTai(http);
-            return actor is null ? Results.Unauthorized() : Results.Ok(actor);
+            return actor is null ? Results.Unauthorized() : Results.Ok(new {
+                actor.MaNguoiDung, actor.MaCoQuan, actor.TenDangNhap, actor.HoTen,
+                capabilities = await permissions.DanhSachQuyen(actor)
+            });
         }).RequireAuthorization();
 
         group.MapGet("/profile",async(HttpContext http,PhanQuyen permissions,Database db)=>{
