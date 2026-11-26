@@ -412,11 +412,11 @@ public static class KySoEndpoints
             var old=await LayBienNhan(cn,tx,actor.MaCoQuan.Value,request.MaYeuCau,command);
             if(old!=null){tx.Commit();return Results.Content(old,"application/json");}
             var authorizedRole=await CoVaiTro(cn,tx,actor,stage.Role);
-            if(doc.SoBuocKy==4 && request.LoaiChuKy=="KY_NHAY")
+            if(doc.SoBuocKy is 4 or 5 && request.LoaiChuKy=="KY_NHAY")
                 authorizedRole=authorizedRole || await CoVaiTro(cn,tx,actor,"PHO_PHONG") ||
                     await CoVaiTro(cn,tx,actor,"TRUONG_VAN_PHONG") ||
                     await CoVaiTro(cn,tx,actor,"PHO_VAN_PHONG");
-            if(doc.SoBuocKy is 3 or 4 && request.LoaiChuKy=="KY_LANH_DAO")
+            if(doc.SoBuocKy is 3 or 4 or 5 && request.LoaiChuKy=="KY_LANH_DAO")
                 authorizedRole=authorizedRole || await CoVaiTro(cn,tx,actor,"PHO_LANH_DAO");
             if(!authorizedRole){
                 tx.Rollback();return Results.Forbid();
