@@ -54,7 +54,9 @@ public static class HoSoEndpoints
                 h.MaPhongBan,p.TenPhongBan,h.SoNamBaoQuan,h.GhiChu,h.DaDong,h.ThoiDiemTao,
                 h.ThoiDiemCapNhat,n.HoTen AS NguoiTao,
                 (SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBan hv JOIN dbo.VanBan v ON v.MaVanBan=hv.MaVanBan
-                 WHERE hv.MaHoSo=h.MaHoSo AND v.MaCoQuan=@agency AND v.DoMat='THUONG' " + VanBanEndpoints.PhamViVanBan + @") AS SoVanBan
+                 WHERE hv.MaHoSo=h.MaHoSo AND v.MaCoQuan=@agency AND v.DoMat='THUONG' " + VanBanEndpoints.PhamViVanBan + @")
+                + (SELECT COUNT(*) FROM dbo.HoSoLuuTruVanBanDen hd JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                   WHERE hd.MaHoSo=h.MaHoSo AND d.MaCoQuanNhan=@agency) AS SoVanBan
                 FROM dbo.HoSoLuuTru h LEFT JOIN dbo.PhongBan p ON p.MaPhongBan=h.MaPhongBan
                 JOIN dbo.NguoiDung n ON n.MaNguoiDung=h.MaNguoiTao
                 WHERE h.MaCoQuan=@agency AND " + DuocXem + @"
@@ -109,6 +111,13 @@ public static class HoSoEndpoints
                 WHERE hv.MaHoSo=@id AND hv.MaCoQuan=@agency AND v.MaCoQuan=@agency
                   AND v.DoMat='THUONG' " + VanBanEndpoints.PhamViVanBan + @"
                 ORDER BY hv.ThoiDiemThem DESC",new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,admin});
+            var incoming=await cn.QueryAsync(@"
+                SELECT d.MaVanBanDen,d.SoDen,d.Nam,d.TieuDe,d.TrangThai,hd.ThoiDiemThem,
+                       n.HoTen AS NguoiThem
+                FROM dbo.HoSoLuuTruVanBanDen hd JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                JOIN dbo.NguoiDung n ON n.MaNguoiDung=hd.MaNguoiThem
+                WHERE hd.MaHoSo=@id AND hd.MaCoQuan=@agency AND d.MaCoQuanNhan=@agency
+                ORDER BY hd.ThoiDiemThem DESC",new{id,agency=actor.MaCoQuan});
             var history=await cn.QueryAsync(@"SELECT l.MaLichSu,l.MaVanBan,l.HanhDong,l.MoTa,l.ThoiDiem,
                 n.HoTen AS NguoiThucHien FROM dbo.LichSuHoSo l
                 JOIN dbo.NguoiDung n ON n.MaNguoiDung=l.MaNguoiThucHien
@@ -118,7 +127,7 @@ public static class HoSoEndpoints
             var visibleIds=(await cn.QueryAsync<Guid>(@"SELECT v.MaVanBan FROM dbo.VanBan v
                 WHERE v.MaCoQuan=@agency AND v.DoMat='THUONG' " + VanBanEndpoints.PhamViVanBan,
                 new{agency=actor.MaCoQuan,user=actor.MaNguoiDung})).ToHashSet();
-            return Results.Ok(new{HoSo=dossier,VanBan=docs,LichSu=history.Select(h=>new{
+            return Results.Ok(new{HoSo=dossier,VanBan=docs,VanBanDen=incoming,LichSu=history.Select(h=>new{
                 h.MaLichSu,MaVanBan=h.MaVanBan!=null && visibleIds.Contains((Guid)h.MaVanBan)?h.MaVanBan:null,
                 h.HanhDong,MoTa=h.MaVanBan==null||visibleIds.Contains((Guid)h.MaVanBan)?h.MoTa:"Thao tác trên văn bản được giới hạn quyền xem.",
                 h.ThoiDiem,h.NguoiThucHien})});
@@ -169,6 +178,92 @@ public static class HoSoEndpoints
             await Ghi(cn,tx,id,actor,"THEM_VAN_BAN",body.MaVanBan,"Đưa văn bản đã phát hành vào hồ sơ.");
             await cn.ExecuteAsync("UPDATE dbo.HoSoLuuTru SET ThoiDiemCapNhat=SYSUTCDATETIME() WHERE MaHoSo=@id",new{id},tx);
             tx.Commit();return Results.Ok(new{message="Đã liên kết văn bản."});
+        });
+
+        routes.MapGet("/incoming-available",async(HttpContext http,PhanQuyen permission,Database db)=>{
+            var(actor,_,error)=await Quyen(http,permission);if(error!=null)return error;
+            using var cn=db.Open();
+            var rows=await cn.QueryAsync(@"
+                SELECT d.MaVanBanDen,d.SoDen,d.Nam,d.TieuDe,d.TrangThai
+                FROM dbo.VanBanDen d
+                WHERE d.MaCoQuanNhan=@agency AND d.SoDen IS NOT NULL AND d.TrangThai='HOAN_THANH'
+                ORDER BY d.Nam DESC,d.SoDen DESC",new{agency=actor!.MaCoQuan});
+            return Results.Ok(rows);
+        });
+
+        routes.MapPost("/{id:guid}/incoming-documents",async(Guid id,LienKetVanBan body,
+            HttpContext http,PhanQuyen permission,Database db)=>{
+            var(actor,admin,error)=await Quyen(http,permission);if(error!=null)return error;
+            using var cn=db.Open();await cn.OpenAsync();using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
+            var allowed=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.HoSoLuuTru h WITH(UPDLOCK,HOLDLOCK)
+                WHERE h.MaHoSo=@id AND h.MaCoQuan=@agency AND h.DaDong=0 AND "+DuocSua,
+                new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung,admin},tx);
+            if(allowed!=1){tx.Rollback();return Results.Conflict(new{message="Hồ sơ đã đóng hoặc không thuộc quyền chỉnh sửa."});}
+            var count=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.VanBanDen d
+                WHERE d.MaVanBanDen=@doc AND d.MaCoQuanNhan=@agency
+                  AND d.SoDen IS NOT NULL AND d.TrangThai='HOAN_THANH'",
+                new{doc=body.MaVanBan,agency=actor.MaCoQuan},tx);
+            if(count!=1){tx.Rollback();return Results.BadRequest(new{message="Chỉ lưu văn bản đến đã cấp số và hoàn thành xử lý trong cơ quan."});}
+            var inserted=await cn.ExecuteAsync(@"
+                INSERT dbo.HoSoLuuTruVanBanDen(MaHoSo,MaCoQuan,MaVanBanDen,MaNguoiThem)
+                SELECT @id,@agency,@doc,@user WHERE NOT EXISTS(
+                    SELECT 1 FROM dbo.HoSoLuuTruVanBanDen WITH(UPDLOCK,HOLDLOCK)
+                    WHERE MaHoSo=@id AND MaVanBanDen=@doc)",
+                new{id,agency=actor.MaCoQuan,doc=body.MaVanBan,user=actor.MaNguoiDung},tx);
+            if(inserted==0){tx.Rollback();return Results.Conflict(new{message="Văn bản đến đã có trong hồ sơ."});}
+            await Ghi(cn,tx,id,actor,"THEM_VB_DEN",null,"Liên kết văn bản đến đã hoàn thành vào hồ sơ.");
+            await cn.ExecuteAsync(@"UPDATE dbo.HoSoLuuTru SET ThoiDiemCapNhat=SYSUTCDATETIME()
+                WHERE MaHoSo=@id",new{id},tx);
+            tx.Commit();return Results.Ok(new{message="Đã đưa văn bản đến vào hồ sơ."});
+        });
+
+        routes.MapDelete("/{id:guid}/incoming-documents/{documentId:guid}",async(Guid id,Guid documentId,
+            HttpContext http,PhanQuyen permission,Database db)=>{
+            var(actor,admin,error)=await Quyen(http,permission);if(error!=null)return error;
+            using var cn=db.Open();await cn.OpenAsync();using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
+            var allowed=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM dbo.HoSoLuuTru h WITH(UPDLOCK,HOLDLOCK)
+                WHERE h.MaHoSo=@id AND h.MaCoQuan=@agency AND h.DaDong=0 AND "+DuocSua,
+                new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung,admin},tx);
+            if(allowed!=1){tx.Rollback();return Results.Forbid();}
+            var changed=await cn.ExecuteAsync(@"
+                DELETE FROM dbo.HoSoLuuTruVanBanDen WHERE MaHoSo=@id AND MaCoQuan=@agency
+                    AND MaVanBanDen=@documentId",new{id,agency=actor.MaCoQuan,documentId},tx);
+            if(changed==0){tx.Rollback();return Results.NotFound();}
+            await Ghi(cn,tx,id,actor,"BO_VB_DEN",null,"Gỡ liên kết văn bản đến, không xóa bản phát hành.");
+            tx.Commit();return Results.Ok(new{message="Đã gỡ văn bản đến khỏi hồ sơ."});
+        });
+
+        routes.MapGet("/{id:guid}/incoming-documents/{documentId:guid}/pdf",async(Guid id,Guid documentId,
+            HttpContext http,PhanQuyen permission,Database db,DichVuKyPdf signer)=>{
+            var(actor,admin,error)=await Quyen(http,permission);if(error!=null)return error;
+            using var cn=db.Open();
+            var file=await cn.QueryFirstOrDefaultAsync<TepMinhChungRow>(@"
+                SELECT s.DuongDanLuuTru,s.MaBamSha256
+                FROM dbo.HoSoLuuTru h
+                JOIN dbo.HoSoLuuTruVanBanDen hd ON hd.MaHoSo=h.MaHoSo AND hd.MaCoQuan=h.MaCoQuan
+                JOIN dbo.VanBanDen d ON d.MaVanBanDen=hd.MaVanBanDen
+                JOIN dbo.LuotChuyenVanBan l ON l.MaLuotChuyen=d.MaLuotChuyen
+                JOIN dbo.BanPhatHanh p ON p.MaPhatHanh=l.MaPhatHanh
+                JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
+                JOIN dbo.BanPdfDaKy s ON s.MaVanBan=p.MaVanBan AND s.SoPhienBan=p.SoPhienBan
+                    AND s.ThuTuKy=v.SoBuocKy AND s.MaBamSha256=p.MaBamBanCuoi
+                WHERE h.MaHoSo=@id AND hd.MaVanBanDen=@documentId AND h.MaCoQuan=@agency
+                  AND d.MaCoQuanNhan=@agency AND l.MaCoQuanNhan=@agency AND "+DuocXem,
+                new{id,documentId,agency=actor!.MaCoQuan,user=actor.MaNguoiDung,admin});
+            if(file is null)return Results.NotFound();
+            if(!File.Exists(file.DuongDanLuuTru) ||
+               await DichVuKyPdf.Bam(file.DuongDanLuuTru)!=file.MaBamSha256)
+                return Results.Conflict(new{message="PDF lưu trữ không còn nguyên vẹn."});
+            try{
+                var signatures=signer.XacMinh(file.DuongDanLuuTru);
+                if(signatures.Count==0 || signatures.Any(s=>!s.ToanVenMatMa) ||
+                    !signatures[^1].BaoPhuToanBoBanHienTai)
+                    return Results.Conflict(new{message="Chữ ký PDF không hợp lệ."});
+            }catch{return Results.Conflict(new{message="Không xác minh được chữ ký PDF."});}
+            return Results.File(file.DuongDanLuuTru,"application/pdf");
         });
 
         routes.MapDelete("/{id:guid}/documents/{documentId:guid}",async(Guid id,Guid documentId,
