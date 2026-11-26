@@ -8,6 +8,8 @@ using iText.Commons.Bouncycastle.Crypto;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas;
 using iText.Kernel.Font;
+using iText.Forms.Form.Element;
+using iText.IO.Image;
 using iText.IO.Font;
 using iText.Signatures;
 using Org.BouncyCastle.Pkcs;
@@ -113,8 +115,11 @@ public sealed class DichVuKyPdf(IConfiguration config)
 
     public sealed record KetQuaKy(string TenTruongKy,byte[] DuLieuCms,byte[] ChungThuCongKhai);
 
+    // Relative coordinates from the top-left, independent of source page size.
+    public sealed record ViTriHienThi(byte[]? AnhPng,int Trang,float X,float Y,float Rong,float Cao,string Nhan);
+
     public KetQuaKy Ky(string source,string destination,string field,Guid certId,int agency,
-        int? owner,string keyPath,string label)
+        int? owner,string keyPath,string label,ViTriHienThi? viTri=null)
     {
         var pkcs12=DocPfx(certId,agency,owner,keyPath);
         try {
@@ -127,10 +132,40 @@ public sealed class DichVuKyPdf(IConfiguration config)
             IPrivateKey privateKey=new PrivateKeyBC(store.GetKey(alias).Key);
             IX509Certificate[] chain=store.GetCertificateChain(alias)
                 .Select(item=>(IX509Certificate)new X509CertificateBC(item.Certificate)).ToArray();
-            var signer=new PdfSigner(new PdfReader(source),new FileStream(destination,FileMode.CreateNew),
+            // Dispose the output even when iText fails before SignDetached closes the PDF.
+            // Otherwise Windows holds a lock and error cleanup hides the original exception.
+            using var output=new FileStream(destination,FileMode.CreateNew,FileAccess.Write,FileShare.None);
+            var signer=new PdfSigner(new PdfReader(source),output,
                 new StampingProperties().UseAppendMode());
             signer.GetSignerProperties().SetFieldName(field);
-            // Invisible cryptographic PDF signature. Visual marks require separate design.
+            if(viTri!=null){
+                if(viTri.Trang<1 || viTri.X<0 || viTri.Y<0 || viTri.Rong<=0 || viTri.Cao<=0 ||
+                   viTri.X+viTri.Rong>1 || viTri.Y+viTri.Cao>1)
+                    throw new InvalidDataException("Tọa độ hiển thị chữ ký nằm ngoài trang PDF.");
+                using(var inspect=new PdfDocument(new PdfReader(source))){
+                    if(viTri.Trang>inspect.GetNumberOfPages())
+                        throw new InvalidDataException("Trang đặt chữ ký không tồn tại.");
+                    var page=inspect.GetPage(viTri.Trang);
+                    if(page.GetRotation()!=0)
+                        throw new InvalidDataException("Trang PDF xoay chưa hỗ trợ đặt vùng chữ ký; hãy chuẩn hóa trang trước khi soạn.");
+                    var pageSize=page.GetPageSize();
+                    var rect=new iText.Kernel.Geom.Rectangle(pageSize.GetX()+viTri.X*pageSize.GetWidth(),
+                        pageSize.GetY()+(1-viTri.Y-viTri.Cao)*pageSize.GetHeight(),
+                        viTri.Rong*pageSize.GetWidth(),viTri.Cao*pageSize.GetHeight());
+                    var properties=signer.GetSignerProperties();
+                    properties.SetPageNumber(viTri.Trang).SetPageRect(rect);
+                    var appearance=new SignatureFieldAppearance(field);
+                    if(viTri.AnhPng!=null){
+                        var image=ImageDataFactory.Create(viTri.AnhPng);
+                        // Individual signatures use image-only content, matching the drag-and-drop preview.
+                        // The agency seal also carries the official issue number in the same signature field.
+                        if(label=="KY_CO_QUAN")appearance.SetContent(viTri.Nhan,image);
+                        else appearance.SetContent(image);
+                    }
+                    else appearance.SetContent(viTri.Nhan);
+                    properties.SetSignatureAppearance(appearance);
+                }
+            }
             IExternalSignature external=new PrivateKeySignature(privateKey,"SHA-256");
             signer.SignDetached(external,chain,null,null,null,0,PdfSigner.CryptoStandard.CMS);
             using var pdf=new PdfDocument(new PdfReader(destination));

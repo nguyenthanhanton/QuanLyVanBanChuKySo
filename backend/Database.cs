@@ -28,13 +28,21 @@ public sealed class PhanQuyen(Database db)
     {
         using var cn = db.Open();
         var quyen = await cn.QueryAsync<string>(@"
-            SELECT DISTINCT q.MaDinhDanh
-            FROM dbo.NguoiDungVaiTro nvt
-            JOIN dbo.VaiTroQuyen vtq ON vtq.MaVaiTro=nvt.MaVaiTro
-                AND ((vtq.MaCoQuan=nvt.MaCoQuan) OR (vtq.MaCoQuan IS NULL AND nvt.MaCoQuan IS NULL))
-            JOIN dbo.Quyen q ON q.MaQuyen=vtq.MaQuyen
-            WHERE nvt.MaNguoiDung=@MaNguoiDung
-              AND ((nvt.MaCoQuan=@MaCoQuan) OR (nvt.MaCoQuan IS NULL AND @MaCoQuan IS NULL))",
+            WITH QuyenVaiTro AS (
+                SELECT DISTINCT q.MaQuyen,q.MaDinhDanh
+                FROM dbo.NguoiDungVaiTro nvt
+                JOIN dbo.VaiTroQuyen vtq ON vtq.MaVaiTro=nvt.MaVaiTro
+                    AND ((vtq.MaCoQuan=nvt.MaCoQuan) OR (vtq.MaCoQuan IS NULL AND nvt.MaCoQuan IS NULL))
+                JOIN dbo.Quyen q ON q.MaQuyen=vtq.MaQuyen
+                WHERE nvt.MaNguoiDung=@MaNguoiDung
+                  AND ((nvt.MaCoQuan=@MaCoQuan) OR (nvt.MaCoQuan IS NULL AND @MaCoQuan IS NULL))
+            )
+            SELECT DISTINCT q.MaDinhDanh FROM dbo.Quyen q
+            LEFT JOIN QuyenVaiTro inherited ON inherited.MaQuyen=q.MaQuyen
+            LEFT JOIN dbo.PhanQuyenNguoiDung pq
+              ON pq.MaQuyen=q.MaQuyen AND pq.MaNguoiDung=@MaNguoiDung
+                 AND pq.MaCoQuan=@MaCoQuan
+            WHERE (pq.ChoPhep=1 OR (pq.MaQuyen IS NULL AND inherited.MaQuyen IS NOT NULL))",
             user);
         return quyen.ToArray();
     }

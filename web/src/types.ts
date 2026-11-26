@@ -1,4 +1,4 @@
-export type Trang = 'tong-quan' | 'van-ban-di' | 'van-ban-den' | 'cong-viec' | 'hanh-trinh' | 'giao-nhan' | 'ho-so' | 'bao-cao' | 'quan-tri';
+export type Trang = 'tong-quan' | 'van-ban-di' | 'van-ban-den' | 'cong-viec' | 'hanh-trinh' | 'giao-nhan' | 'ho-so' | 'bao-cao' | 'giam-sat' | 'quan-tri' | 'co-cau' | 'uy-quyen' | 'quan-tri-he-thong';
 export type TrangThai = 'NHAP' | 'TRA_SUA' | 'CHO_DUYET' | 'CHO_CAP_SO' | 'DA_CAP_SO' | 'CHO_KY' | 'DA_KY' | 'DA_PHAT_HANH' | 'DANG_CHUYEN' | 'HOAN_THANH';
 export type Loai = 'DI' | 'DEN';
 export interface SuKien {
@@ -38,6 +38,7 @@ export interface VanBan {
   createdAt: string;
   dueAt?: string;
   version: number;
+  signingSteps?: number;
   to: string[];
   events: SuKien[];
   transfers: ChuyenPhat[];

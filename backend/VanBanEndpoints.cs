@@ -10,11 +10,18 @@ public static class VanBanEndpoints
 {
     // Bo loc pham vi su dung cho moi duong doc; khong dua vao an menu de bao mat.
     // Tai lieu MAT chi xem khi la nguoi tao hoac nguoi duoc giao dich danh.
-    private const string PhamViVanBan = @"
+    internal const string PhamViVanBan = @"
       AND (
         v.MaNguoiTao=@user
         OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t
                   WHERE t.MaVanBan=v.MaVanBan AND t.MaNguoiDuocGiao=@user)
+        OR EXISTS(SELECT 1 FROM dbo.TacVuXuLy t
+                  JOIN dbo.UyQuyenKyTacVu q ON q.MaTacVu=t.MaTacVu
+                  WHERE t.MaVanBan=v.MaVanBan AND t.MaCoQuan=@agency
+                    AND t.TrangThai='CHO_XU_LY' AND q.MaCoQuan=@agency
+                    AND q.MaNguoiGoc=t.MaNguoiDuocGiao
+                    AND q.MaNguoiDuocUyQuyen=@user AND q.DaThuHoi=0
+                    AND q.HieuLucTu<=SYSUTCDATETIME() AND q.HieuLucDen>SYSUTCDATETIME())
         OR (v.DoMat='THUONG' AND EXISTS(
               SELECT 1 FROM dbo.NguoiDungVaiTro uv
               JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
@@ -61,7 +68,7 @@ public static class VanBanEndpoints
             var rows = await cn.QueryAsync(@"
                 SELECT v.MaVanBan, v.MaNoiBo, v.TieuDe, v.TrichYeu, v.TrangThai,
                        v.DoMat, v.DoKhan, v.LoaiVanBan, v.PhienBanHienTai, v.SoPhatHanh,
-                       v.KyHieu, v.NgayBanHanh, v.ThoiDiemTao, v.ThoiDiemCapNhat,
+                       v.KyHieu, v.NgayBanHanh, v.ThoiDiemTao, v.ThoiDiemCapNhat,v.SoBuocKy,
                        n.HoTen AS NguoiTao, v.PhienBanDong
                 FROM dbo.VanBan v JOIN dbo.NguoiDung n ON n.MaNguoiDung=v.MaNguoiTao
                 WHERE v.MaCoQuan=@agency
@@ -82,7 +89,7 @@ public static class VanBanEndpoints
             var doc = await cn.QuerySingleOrDefaultAsync(@"
                 SELECT v.MaVanBan, v.MaNoiBo, v.TieuDe, v.TrichYeu, v.TrangThai,
                        v.DoMat, v.DoKhan, v.LoaiVanBan, v.PhienBanHienTai, v.SoPhatHanh,
-                       v.KyHieu, v.NgayBanHanh, v.ThoiDiemTao, v.PhienBanDong,
+                       v.KyHieu, v.NgayBanHanh, v.ThoiDiemTao, v.PhienBanDong,v.SoBuocKy,
                        n.HoTen AS NguoiTao, c.TenCoQuan
                 FROM dbo.VanBan v
                 JOIN dbo.NguoiDung n ON n.MaNguoiDung=v.MaNguoiTao
@@ -277,11 +284,28 @@ public static class VanBanEndpoints
                 WHERE v.MaVanBan=@id AND v.MaCoQuan=@agency",new{id,agency=actor!.MaCoQuan});
             if(doc==null)return Results.NotFound();
             var events=await cn.QueryAsync(@"
-                SELECT l.MaLichSu,l.HanhDong,l.MoTa,l.TrangThaiTruoc,l.TrangThaiSau,l.SoPhienBan,
+                SELECT l.MaLichSu,l.HanhDong,
+                       CASE WHEN proxy.NguoiGoc IS NOT NULL
+                            THEN CONCAT(l.MoTa,N' | Ký thay cho ',proxy.NguoiGoc,N'; lý do: ',proxy.LyDo)
+                            ELSE l.MoTa END AS MoTa,
+                       l.TrangThaiTruoc,l.TrangThaiSau,l.SoPhienBan,
                        l.ThoiDiem,n.HoTen AS NguoiThucHien,c.TenCoQuan
                 FROM dbo.LichSuVanBan l
                 LEFT JOIN dbo.NguoiDung n ON n.MaNguoiDung=l.MaNguoiThucHien
                 JOIN dbo.CoQuan c ON c.MaCoQuan=l.MaCoQuan
+                OUTER APPLY (SELECT TOP 1 g.HoTen AS NguoiGoc,q.LyDo
+                    FROM dbo.UyQuyenKyTacVu q
+                    JOIN dbo.TacVuXuLy t ON t.MaTacVu=q.MaTacVu AND t.MaCoQuan=q.MaCoQuan
+                    JOIN dbo.NguoiDung g ON g.MaNguoiDung=q.MaNguoiGoc
+                    JOIN dbo.ChuKySo s ON s.MaVanBan=q.MaVanBan AND s.MaCoQuan=q.MaCoQuan
+                      AND s.SoPhienBan=t.PhienBanDuocDuyet AND s.MaNguoiKy=q.MaNguoiDuocUyQuyen
+                    WHERE q.MaVanBan=l.MaVanBan AND q.MaCoQuan=l.MaCoQuan
+                      AND q.MaNguoiDuocUyQuyen=l.MaNguoiThucHien
+                      AND s.LoaiChuKy=l.HanhDong AND s.SoPhienBan=l.SoPhienBan
+                      AND ((t.Buoc='KIEM_TRA_NOI_DUNG' AND l.HanhDong='KY_NHAY')
+                        OR (t.Buoc='PHE_DUYET_LANH_DAO' AND l.HanhDong='KY_LANH_DAO'))
+                      AND s.ThoiDiemKy>=q.HieuLucTu AND s.ThoiDiemKy<=q.HieuLucDen
+                    ORDER BY s.ThoiDiemKy DESC) proxy
                 WHERE l.MaVanBan=@id AND
                   (l.MaCoQuan=@agency OR (l.PhamViHienThi='GIAO_NHAN' AND EXISTS(
                     SELECT 1 FROM dbo.LuotChuyenVanBan ch

@@ -1,6 +1,8 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Xml.Linq;
+using iText.Kernel.Pdf;
+using iText.Kernel.Exceptions;
 
 // Only non-executable, non-macro document formats. Validate the file header,
 // never trust the MIME type claimed by the browser.
@@ -31,8 +33,23 @@ public static class DichVuTepVanBan
         await using var stream=file.OpenReadStream();
         var magic=new byte[8];
         if(await stream.ReadAsync(magic)!=magic.Length)return "Tệp không hợp lệ.";
-        if(extension.Equals(".pdf",StringComparison.OrdinalIgnoreCase))
-            return System.Text.Encoding.ASCII.GetString(magic[..5])=="%PDF-"?null:"Tệp PDF sai định dạng.";
+        if(extension.Equals(".pdf",StringComparison.OrdinalIgnoreCase)){
+            if(System.Text.Encoding.ASCII.GetString(magic[..5])!="%PDF-")
+                return "Tệp PDF sai định dạng.";
+            // Header %PDF- không bảo đảm có xref/trailer và trang đọc được.
+            // Kiểm tra trước khi ghi tệp vào storage để không tạo nháp ký hỏng.
+            try{
+                await using var pdfStream=file.OpenReadStream();
+                using var reader=new PdfReader(pdfStream);
+                using var pdf=new PdfDocument(reader);
+                if(pdf.GetNumberOfPages()<1)return "Tệp PDF không có trang hợp lệ.";
+                if(reader.HasRebuiltXref()||reader.HasFixedXref())
+                    return "Tệp PDF có cấu trúc lỗi phải phục hồi, không thể ký số an toàn.";
+            }catch(Exception ex)when(ex is PdfException or IOException or InvalidOperationException or ArgumentException){
+                return "Tệp PDF bị hỏng hoặc không đọc được cấu trúc (xref/trailer/trang).";
+            }
+            return null;
+        }
         if(extension.Equals(".doc",StringComparison.OrdinalIgnoreCase) ||
            extension.Equals(".xls",StringComparison.OrdinalIgnoreCase)){
             return magic.SequenceEqual(new byte[]{0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1})

@@ -1,0 +1,24 @@
+.system-admin-page{display:grid;gap:22px;min-width:0;padding-bottom:30px}
+.system-admin-section{min-width:0;overflow:hidden}
+.system-admin-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;padding:20px 24px;align-items:end}
+.system-admin-form label{display:flex;flex-direction:column;gap:7px;font-size:13px;font-weight:600;color:#294363;min-width:0}
+.system-admin-form input,.system-admin-form select{width:100%;min-width:0;height:42px;border:1px solid #d2dfef;border-radius:9px;padding:0 12px;color:#163457;background:#fff}
+.system-admin-form button{justify-self:start;min-height:42px}
+.system-admin-table{max-width:100%;overflow-x:auto}
+.system-admin-table table{width:100%;border-collapse:collapse;min-width:720px;text-align:left}
+.system-admin-table th,.system-admin-table td{padding:16px 20px;border-bottom:1px solid #e1e9f3;font-size:13px}
+.system-admin-table th{color:#66809c;background:#f7faff}
+.system-admin-table td strong,.system-admin-table td small{display:block}
+.system-admin-table td small{margin-top:4px;color:#8295ad}
+.system-admin-actions{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.system-admin-selected{background:#f0f7ff}
+.system-admin-users{padding:10px 24px 18px}
+.system-admin-user{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid #e4ecf5}
+.system-admin-user:last-child{border-bottom:0}
+.system-admin-user small{display:block;margin-top:5px;color:#7590ac}
+.system-admin-user time{color:#7890ab;font-size:12px;white-space:nowrap}
+.system-admin-alert{border-radius:9px;padding:13px 16px;font-size:14px}
+.system-admin-alert.error{background:#fff0ef;color:#b62a30}
+.system-admin-alert.success{background:#eaf8f1;color:#116a43}
+.system-admin-empty{color:#7590ac}
+@media(max-width:800px){.system-admin-form{grid-template-columns:minmax(0,1fr);padding:18px}.system-admin-users{padding:10px 18px}.system-admin-table th,.system-admin-table td{padding:12px}}

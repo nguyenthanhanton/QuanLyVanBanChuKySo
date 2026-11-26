@@ -6,6 +6,8 @@ using Dapper;
 using Microsoft.IdentityModel.Tokens;
 
 public sealed record YeuCauDangNhap(string TenDangNhap, string MatKhau);
+public sealed record SuaHoTenCaNhan(string HoTen);
+public sealed record DoiMatKhauCaNhan(string MatKhauHienTai,string MatKhauMoi);
 public sealed class TaiKhoanDangNhap {
     public int MaNguoiDung { get; set; }
     public int? MaCoQuan { get; set; }
@@ -105,7 +107,77 @@ public static class XacThucEndpoints
 
         group.MapGet("/me", async (HttpContext http, PhanQuyen permissions) => {
             var actor = await permissions.NguoiHienTai(http);
-            return actor is null ? Results.Unauthorized() : Results.Ok(actor);
+            return actor is null ? Results.Unauthorized() : Results.Ok(new {
+                actor.MaNguoiDung, actor.MaCoQuan, actor.TenDangNhap, actor.HoTen,
+                capabilities = await permissions.DanhSachQuyen(actor)
+            });
+        }).RequireAuthorization();
+
+        group.MapGet("/profile",async(HttpContext http,PhanQuyen permissions,Database db)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor is null)return Results.Unauthorized();
+            using var cn=db.Open();
+            var profile=await cn.QuerySingleOrDefaultAsync(@"
+                SELECT n.MaNguoiDung,n.TenDangNhap,n.HoTen,n.ChucVu,
+                       n.MaCoQuan,c.TenCoQuan,p.TenPhongBan,
+                       (SELECT STRING_AGG(r.TenVaiTro,N', ')
+                        FROM dbo.NguoiDungVaiTro ur JOIN dbo.VaiTro r ON r.MaVaiTro=ur.MaVaiTro
+                        WHERE ur.MaNguoiDung=n.MaNguoiDung AND ur.MaCoQuan=n.MaCoQuan) AS VaiTro
+                FROM dbo.NguoiDung n
+                LEFT JOIN dbo.CoQuan c ON c.MaCoQuan=n.MaCoQuan
+                LEFT JOIN dbo.PhongBan p ON p.MaPhongBan=n.MaPhongBan AND p.MaCoQuan=n.MaCoQuan
+                WHERE n.MaNguoiDung=@user AND n.DangHoatDong=1",
+                new{user=actor.MaNguoiDung});
+            return profile is null?Results.NotFound():Results.Ok(profile);
+        }).RequireAuthorization();
+
+        group.MapPut("/profile/name",async(SuaHoTenCaNhan body,HttpContext http,
+            PhanQuyen permissions,Database db)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor is null)return Results.Unauthorized();
+            var name=body.HoTen?.Trim()??"";
+            if(name.Length is < 3 or > 150)return Results.BadRequest(new{message="Họ tên phải có 3–150 ký tự."});
+            using var cn=db.Open();await cn.OpenAsync();using var tx=cn.BeginTransaction();
+            var changed=await cn.ExecuteAsync(@"
+                UPDATE dbo.NguoiDung SET HoTen=@name WHERE MaNguoiDung=@user AND DangHoatDong=1",
+                new{name,user=actor.MaNguoiDung},tx);
+            if(changed!=1){tx.Rollback();return Results.NotFound();}
+            await cn.ExecuteAsync(@"
+                INSERT dbo.NhatKyHeThong(MaCoQuan,MaNguoiDung,LoaiNhatKy,HanhDong,MoTa)
+                VALUES(@agency,@user,'NGHIEP_VU','CAP_NHAT_HO_TEN',N'Người dùng tự cập nhật họ tên')",
+                new{agency=actor.MaCoQuan,user=actor.MaNguoiDung},tx);
+            tx.Commit();return Results.Ok(new{message="Đã cập nhật họ tên.",hoTen=name});
+        }).RequireAuthorization();
+
+        group.MapPut("/profile/password",async(DoiMatKhauCaNhan body,HttpContext http,
+            PhanQuyen permissions,Database db)=>{
+            var actor=await permissions.NguoiHienTai(http);
+            if(actor is null)return Results.Unauthorized();
+            if(string.IsNullOrEmpty(body.MatKhauHienTai) || string.IsNullOrEmpty(body.MatKhauMoi) ||
+               body.MatKhauMoi.Length is < 12 or > 128)
+                return Results.BadRequest(new{message="Cần nhập mật khẩu hiện tại và mật khẩu mới dài 12–128 ký tự."});
+            using var cn=db.Open();await cn.OpenAsync();
+            using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
+            var oldHash=await cn.ExecuteScalarAsync<string?>(@"
+                SELECT MatKhauBam FROM dbo.NguoiDung WITH(UPDLOCK,HOLDLOCK)
+                WHERE MaNguoiDung=@user AND DangHoatDong=1",
+                new{user=actor.MaNguoiDung},tx);
+            if(oldHash is null){tx.Rollback();return Results.Unauthorized();}
+            if(!MatKhau.KiemTra(body.MatKhauHienTai,oldHash)){
+                tx.Rollback();return Results.BadRequest(new{message="Mật khẩu hiện tại không đúng."});
+            }
+            if(MatKhau.KiemTra(body.MatKhauMoi,oldHash)){
+                tx.Rollback();return Results.BadRequest(new{message="Mật khẩu mới phải khác mật khẩu hiện tại."});
+            }
+            await cn.ExecuteAsync(@"
+                UPDATE dbo.NguoiDung SET MatKhauBam=@hash,SoLanSai=0,KhoaDen=NULL
+                WHERE MaNguoiDung=@user",
+                new{hash=MatKhau.TaoBam(body.MatKhauMoi),user=actor.MaNguoiDung},tx);
+            await cn.ExecuteAsync(@"
+                INSERT dbo.NhatKyHeThong(MaCoQuan,MaNguoiDung,LoaiNhatKy,HanhDong,MoTa)
+                VALUES(@agency,@user,'NGHIEP_VU','DOI_MAT_KHAU',N'Người dùng tự đổi mật khẩu')",
+                new{agency=actor.MaCoQuan,user=actor.MaNguoiDung},tx);
+            tx.Commit();return Results.Ok(new{message="Đã đổi mật khẩu. Vui lòng đăng nhập lại."});
         }).RequireAuthorization();
 
         group.MapGet("/capabilities", async (HttpContext http, PhanQuyen permissions) => {

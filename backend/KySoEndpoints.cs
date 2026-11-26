@@ -5,7 +5,9 @@ using Dapper;
 public sealed record TaoChungThuKy(string LoaiChungThu,string TenChungThu,string MatKhau,
     bool TaoChungThuThuNghiem);
 public sealed record ChuanBiPdf(Guid MaYeuCau);
-public sealed record KyVanBan(string LoaiChuKy,string MatKhau,Guid MaYeuCau);
+public sealed record KyVanBan(string LoaiChuKy,string MatKhau,Guid MaYeuCau,
+    string? HinhAnhKyBase64=null,int? TrangKy=null,float? TyLeX=null,float? TyLeY=null,
+    float? TyLeRong=null,float? TyLeCao=null);
 
 public sealed class HoSoKy {
     public Guid MaVanBan {get;set;}
@@ -15,6 +17,10 @@ public sealed class HoSoKy {
     public string TieuDe {get;set;}="";
     public int? SoPhatHanh {get;set;}
     public string? KyHieu {get;set;}
+    public int MaNguoiTao {get;set;}
+    public byte SoBuocKy {get;set;}=5;
+    public int? MaNguoiKyNhay {get;set;}
+    public int? MaNguoiKyLanhDao {get;set;}
 }
 public sealed class ChungThuLuu {
     public Guid MaChungThu {get;set;}
@@ -37,6 +43,34 @@ public sealed class NguonPdf {
 
 public static class KySoEndpoints
 {
+    // Cleanup must never replace the actual PDF signing error with an IOException.
+    private static void XoaTepTam(string path)
+    {
+        try { if(File.Exists(path)) File.Delete(path); }
+        catch(IOException) { /* PDF writer may still be releasing its handle. */ }
+        catch(UnauthorizedAccessException) { /* Preserve the original exception. */ }
+    }
+    internal static DichVuKyPdf.ViTriHienThi? ViTriKy(KyVanBan request,string label,bool agency=false)
+    {
+        if(string.IsNullOrWhiteSpace(request.HinhAnhKyBase64) && !agency)return null;
+        byte[]? image=null;
+        if(!string.IsNullOrWhiteSpace(request.HinhAnhKyBase64)){
+            if(request.HinhAnhKyBase64.Length>6_990_508)
+                throw new InvalidDataException("Ảnh chữ ký vượt giới hạn 5 MB.");
+            try {image=Convert.FromBase64String(request.HinhAnhKyBase64);}
+            catch(FormatException){throw new InvalidDataException("Ảnh chữ ký không phải Base64 hợp lệ.");}
+            if(image.Length>5_242_880 || image.Length<24 ||
+               !image.AsSpan(0,8).SequenceEqual(new byte[]{137,80,78,71,13,10,26,10}))
+                throw new InvalidDataException("Chỉ hỗ trợ ảnh chữ ký PNG tối đa 5 MB.");
+            var width=System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(image.AsSpan(16,4));
+            var height=System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(image.AsSpan(20,4));
+            if(width is 0 or >4096 || height is 0 or >4096)
+                throw new InvalidDataException("Ảnh chữ ký không được vượt 4096 pixel mỗi chiều.");
+        }
+        return new DichVuKyPdf.ViTriHienThi(image,request.TrangKy??1,
+            request.TyLeX??0.60f,request.TyLeY??0.73f,request.TyLeRong??0.32f,
+            request.TyLeCao??0.11f,label);
+    }
     internal static string TaoDuongDan(IConfiguration config,int agency,Guid doc,Guid fileId)
     {
         var root=config["Storage:RootPath"];
@@ -64,7 +98,8 @@ public static class KySoEndpoints
     internal static async Task<HoSoKy?> LayVanBan(System.Data.IDbConnection cn,
         System.Data.IDbTransaction tx,Guid id,int agency)
         => await cn.QuerySingleOrDefaultAsync<HoSoKy>(@"
-            SELECT MaVanBan,MaCoQuan,PhienBanHienTai,TrangThai,TieuDe,SoPhatHanh,KyHieu
+            SELECT MaVanBan,MaCoQuan,MaNguoiTao,PhienBanHienTai,TrangThai,TieuDe,SoPhatHanh,KyHieu,
+                   SoBuocKy,MaNguoiKyNhay,MaNguoiKyLanhDao
             FROM dbo.VanBan WITH(UPDLOCK,HOLDLOCK) WHERE MaVanBan=@id AND MaCoQuan=@agency",
             new{id,agency},tx);
 
@@ -111,6 +146,7 @@ public static class KySoEndpoints
             var form=await http.Request.ReadFormAsync();
             var type=form["loaiChungThu"].ToString();
             var test=form["thuNghiem"].ToString()=="true";
+            var replaceTest=form["thayTheChungThuThuNghiem"].ToString()=="true";
             var name=form["tenChungThu"].ToString().Trim();
             var password=form["matKhau"].ToString();
             var file=form.Files.GetFile("tepPfx");
@@ -128,12 +164,20 @@ public static class KySoEndpoints
                 tx.Rollback();return Results.BadRequest(new{message="Xác nhận mật khẩu tài khoản không đúng."});
             }
             int? owner=type=="CA_NHAN"?actor.MaNguoiDung:null;
-            var active=await cn.ExecuteScalarAsync<int>(@"
-                SELECT COUNT(1) FROM dbo.ChungThuKy WITH(UPDLOCK,HOLDLOCK)
+            var active=await cn.QuerySingleOrDefaultAsync<ChungThuLuu>(@"
+                SELECT TOP 1 MaChungThu,NguonChungThu FROM dbo.ChungThuKy WITH(UPDLOCK,HOLDLOCK)
                 WHERE MaCoQuan=@agency AND LoaiChungThu=@type AND DangHoatDong=1
                   AND ((MaNguoiSoHuu=@owner) OR (MaNguoiSoHuu IS NULL AND @owner IS NULL))",
                 new{agency=actor.MaCoQuan,type,owner},tx);
-            if(active>0){tx.Rollback();return Results.Conflict(new{message="Đã có chứng thư đang hoạt động. Cần quy trình thu hồi/thay thế riêng."});}
+            if(replaceTest && !test){tx.Rollback();return Results.BadRequest(new{message="Chỉ được thay thế bằng chứng thư tự ký thử nghiệm."});}
+            if(active!=null && (!replaceTest || active.NguonChungThu!="TU_KY_THU_NGHIEM")){
+                tx.Rollback();return Results.Conflict(new{message=active.NguonChungThu=="TU_KY_THU_NGHIEM"
+                    ?"Đã có chứng thư thử nghiệm đang hoạt động. Chọn 'Thay thế chứng thư thử nghiệm cũ' để tạo mới."
+                    :"Chứng thư PFX đang hoạt động không thể thay thế bằng chức năng thử nghiệm."});
+            }
+            if(replaceTest && active==null){
+                tx.Rollback();return Results.BadRequest(new{message="Không có chứng thư thử nghiệm đang hoạt động để thay thế."});
+            }
             var certId=Guid.NewGuid();
             DichVuKyPdf.ChungThuMoi cert;
             try {
@@ -148,6 +192,12 @@ public static class KySoEndpoints
                 tx.Rollback();return Results.BadRequest(new{message="Không thể tạo/nhập chứng thư: "+ex.Message});
             }
             try {
+                if(replaceTest){
+                    await cn.ExecuteAsync(@"
+                        UPDATE dbo.ChungThuKy SET DangHoatDong=0
+                        WHERE MaChungThu=@oldId AND MaCoQuan=@agency AND DangHoatDong=1",
+                        new{oldId=active!.MaChungThu,agency=actor.MaCoQuan},tx);
+                }
                 await cn.ExecuteAsync(@"
                     INSERT dbo.ChungThuKy(MaChungThu,MaCoQuan,MaNguoiSoHuu,LoaiChungThu,NguonChungThu,TenChungThu,
                         SoSerial,ChungThuCongKhai,DuongDanKhoaMaHoa,MaKhoaMaHoa,NgayHieuLuc,NgayHetHan)
@@ -156,13 +206,118 @@ public static class KySoEndpoints
                         publicCert=cert.ChungThuCongKhai,path=cert.DuongDanKhoaMaHoa,
                         keyId=signer.MaKhoa(),source=test?"TU_KY_THU_NGHIEM":"NHAP_PFX",
                         start=cert.NgayHieuLuc,end=cert.NgayHetHan},tx);
+                await cn.ExecuteAsync(@"
+                    INSERT dbo.NhatKyHeThong(MaCoQuan,MaNguoiDung,LoaiNhatKy,HanhDong,MoTa)
+                    VALUES(@agency,@user,'NGHIEP_VU',@action,@description)",
+                    new{agency=actor.MaCoQuan,user=actor.MaNguoiDung,
+                        action=replaceTest?"THAY_CHUNG_THU_THU_NGHIEM":"TAO_CHUNG_THU",
+                        description=replaceTest
+                            ?$"Thay chứng thư thử nghiệm {active!.MaChungThu} bằng {certId}; giữ hồ sơ cũ."
+                            :$"Tạo/nhập chứng thư {certId} ({type})."},tx);
                 tx.Commit();
                 return Results.Created("/api/v1/signing-credentials",new{
                     maChungThu=certId,loaiChungThu=type,noiBoThuNghiem=test,
+                    daThayThe=replaceTest,maChungThuCu=replaceTest?active!.MaChungThu:(Guid?)null,
                     mucDoTinCay=test?"INTERNAL_SELF_SIGNED":"CHUA_THAM_DINH_CA",
                     ngayHetHan=cert.NgayHetHan});
             } catch {tx.Rollback();File.Delete(cert.DuongDanKhoaMaHoa);throw;}
         }).RequireAuthorization().DisableAntiforgery();
+
+        // v0.5.2: sign the actual main draft PDF. Later workflow stages are implemented separately.
+        app.MapPost("/api/v1/documents/{id:guid}/draft-signature",async(Guid id,KyVanBan request,
+            HttpContext http,PhanQuyen permissions,Database db,DichVuKyPdf signer,IConfiguration config)=>{
+            var(actor,error)=await permissions.YeuCau(http,"signing.sign");
+            if(error!=null)return error;
+            if(actor!.MaCoQuan is null)return Results.Forbid();
+            if(request.LoaiChuKy!="KY_NGUOI_SOAN" || request.MaYeuCau==Guid.Empty)
+                return Results.BadRequest(new{message="Yêu cầu ký người soạn hoặc MaYeuCau không hợp lệ."});
+            using var cn=db.Open();await cn.OpenAsync();
+            using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
+            var priorResult=await LayBienNhan(cn,tx,actor.MaCoQuan.Value,request.MaYeuCau,"KY_NGUOI_SOAN");
+            if(priorResult!=null){tx.Commit();return Results.Content(priorResult,"application/json");}
+            var doc=await LayVanBan(cn,tx,id,actor.MaCoQuan.Value);
+            if(doc==null){tx.Rollback();return Results.NotFound();}
+            if(doc.MaNguoiTao!=actor.MaNguoiDung){tx.Rollback();return Results.Forbid();}
+            if(doc.TrangThai is not ("NHAP" or "TRA_SUA")){
+                tx.Rollback();return Results.Conflict(new{message="Chỉ ký khi văn bản còn ở bước soạn thảo."});
+            }
+            if(!await KiemTraMatKhau(cn,tx,actor,request.MatKhau)){
+                tx.Rollback();return Results.BadRequest(new{message="Sai mật khẩu xác nhận ký."});
+            }
+            if(await LayBan(cn,tx,id,doc.PhienBanHienTai,1)!=null){
+                tx.Rollback();return Results.Conflict(new{message="Phiên bản này đã được người soạn ký."});
+            }
+            if(await LayBan(cn,tx,id,doc.PhienBanHienTai,0)!=null){
+                tx.Rollback();return Results.Conflict(new{message="Phiên bản này đã có bản chuẩn bị ký; cần kiểm tra quy trình."});
+            }
+            var source=await cn.QueryFirstOrDefaultAsync<NguonPdf>(@"
+                SELECT TOP 1 f.DuongDanLuuTru,f.MaBamSha256 FROM dbo.TepDinhKem f
+                JOIN dbo.PhienBanVanBan p ON p.MaPhienBan=f.MaPhienBan
+                WHERE p.MaVanBan=@id AND p.SoPhienBan=@version
+                    AND f.LoaiNoiDung='application/pdf' AND f.LaVanBanChinh=1
+                ORDER BY f.MaTep",new{id,version=doc.PhienBanHienTai},tx);
+            if(source==null || !File.Exists(source.DuongDanLuuTru) ||
+                !string.Equals(await DichVuKyPdf.Bam(source.DuongDanLuuTru),source.MaBamSha256,StringComparison.OrdinalIgnoreCase)){
+                tx.Rollback();return Results.Conflict(new{message="Không tìm thấy PDF chính nguyên vẹn của phiên bản hiện tại."});
+            }
+            var cert=await cn.QuerySingleOrDefaultAsync<ChungThuLuu>(@"
+                SELECT TOP 1 MaChungThu,MaCoQuan,MaNguoiSoHuu,DuongDanKhoaMaHoa,MaKhoaMaHoa,
+                    ChungThuCongKhai,NguonChungThu FROM dbo.ChungThuKy
+                WHERE MaCoQuan=@agency AND MaNguoiSoHuu=@user AND LoaiChungThu='CA_NHAN'
+                    AND DangHoatDong=1 AND NgayHieuLuc<=SYSUTCDATETIME()
+                    AND NgayHetHan>SYSUTCDATETIME() ORDER BY ThoiDiemTao DESC",
+                new{agency=actor.MaCoQuan,user=actor.MaNguoiDung},tx);
+            if(cert==null){tx.Rollback();return Results.Conflict(new{message="Người soạn chưa có chứng thư cá nhân đang hoạt động."});}
+            if(cert.MaKhoaMaHoa!=signer.MaKhoa()){
+                tx.Rollback();return Results.Conflict(new{message="Không tìm thấy khóa giải mã chứng thư hiện tại."});
+            }
+            var baseline=Guid.NewGuid();var signedId=Guid.NewGuid();
+            var baselinePath=TaoDuongDan(config,actor.MaCoQuan.Value,id,baseline);
+            var signedPath=TaoDuongDan(config,actor.MaCoQuan.Value,id,signedId);
+            var field=$"Ky_1_{id:N}_v{doc.PhienBanHienTai}";
+            try {
+                // Copy the unsigned PDF without inserting an issue number. No earlier revision is modified.
+                File.Copy(source.DuongDanLuuTru,baselinePath);
+                var baselineHash=await DichVuKyPdf.Bam(baselinePath);
+                var result=signer.Ky(baselinePath,signedPath,field,cert.MaChungThu,
+                    actor.MaCoQuan.Value,actor.MaNguoiDung,cert.DuongDanKhoaMaHoa,"KY_NGUOI_SOAN",
+                    ViTriKy(request,"Nguoi soan"));
+                var checks=signer.XacMinh(signedPath);
+                if(checks.Count!=1 || !checks[0].ToanVenMatMa || !checks[0].BaoPhuToanBoBanHienTai)
+                    throw new CryptographicException("PDF người soạn ký không toàn vẹn hoặc chứa chữ ký không mong đợi.");
+                var hash=await DichVuKyPdf.Bam(signedPath);
+                await cn.ExecuteAsync(@"
+                    INSERT dbo.BanPdfDaKy(MaBan,MaVanBan,MaCoQuan,SoPhienBan,ThuTuKy,DuongDanLuuTru,MaBamSha256)
+                    VALUES(@baseline,@id,@agency,@version,0,@baselinePath,@baselineHash);
+                    INSERT dbo.BanPdfDaKy(MaBan,MaVanBan,MaCoQuan,SoPhienBan,ThuTuKy,MaBanTruoc,DuongDanLuuTru,MaBamSha256,TenTruongKy)
+                    VALUES(@signedId,@id,@agency,@version,1,@baseline,@signedPath,@hash,@field)",
+                    new{baseline,id,agency=actor.MaCoQuan,version=doc.PhienBanHienTai,
+                        baselinePath,baselineHash,signedId,signedPath,hash,field},tx);
+                await cn.ExecuteAsync(@"
+                    INSERT dbo.ChuKySo(MaVanBan,MaCoQuan,MaNguoiKy,SoPhienBan,LoaiChuKy,DinhDangChuKy,
+                        DuLieuChuKy,ChungThuCongKhai,MaBamTaiLieu,MaBamChuKyTruoc,KetQuaXacMinh,
+                        MucDoTinCay,MaBanDaKy,MaChungThu,TenTruongKy)
+                    VALUES(@id,@agency,@user,@version,'KY_NGUOI_SOAN','PADES_CMS',@cms,@publicCert,
+                        @hash,@baselineHash,'HOP_LE_MAT_MA',@trust,@signedId,@certId,@field)",
+                    new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,version=doc.PhienBanHienTai,
+                        cms=result.DuLieuCms,publicCert=cert.ChungThuCongKhai,hash,baselineHash,signedId,
+                        certId=cert.MaChungThu,field,
+                        trust=cert.NguonChungThu=="TU_KY_THU_NGHIEM"?"INTERNAL_SELF_SIGNED":"CHUA_THAM_DINH_CA"},tx);
+                await cn.ExecuteAsync(@"
+                    INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,HanhDong,MoTa,TrangThaiTruoc,TrangThaiSau,SoPhienBan)
+                    VALUES(@id,@agency,@user,'KY_NGUOI_SOAN',N'Người soạn đã ký PDF chính trước khi trình duyệt',@state,@state,@version)",
+                    new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,state=doc.TrangThai,version=doc.PhienBanHienTai},tx);
+                var json=JsonSerializer.Serialize(new{maVanBan=id,loaiChuKy="KY_NGUOI_SOAN",maBan=signedId,
+                    maBamSha256=hash,phienBan=doc.PhienBanHienTai,hopLeMatMa=true});
+                await GhiBienNhan(cn,tx,actor,request.MaYeuCau,"KY_NGUOI_SOAN",json);
+                tx.Commit();return Results.Content(json,"application/json");
+            }catch(Exception ex)when(ex is CryptographicException or InvalidDataException){
+                tx.Rollback();XoaTepTam(signedPath);
+                XoaTepTam(baselinePath);
+                return Results.BadRequest(new{message="Không ký được PDF: "+ex.Message});
+            }catch{tx.Rollback();XoaTepTam(signedPath);
+                XoaTepTam(baselinePath);throw;}
+        }).RequireAuthorization();
 
         app.MapPost("/api/v1/documents/{id:guid}/prepared-pdf",async(Guid id,ChuanBiPdf request,
             HttpContext http,PhanQuyen permissions,Database db,DichVuKyPdf signer,IConfiguration config)=>{
@@ -178,6 +333,9 @@ public static class KySoEndpoints
             if(doc==null){tx.Rollback();return Results.NotFound();}
             if(doc.TrangThai!="DA_CAP_SO" || doc.SoPhatHanh is null){
                 tx.Rollback();return Results.Conflict(new{message="Phải cấp số và duyệt trước khi chuẩn bị ký."});
+            }
+            if(await LayBan(cn,tx,id,doc.PhienBanHienTai,0)!=null){
+                tx.Rollback();return Results.Conflict(new{message="PDF đã ký từ bước người soạn. Chờ bước 0.5.4 xử lý cấp số mà không làm hỏng chữ ký trước."});
             }
             var source=await cn.QueryFirstOrDefaultAsync<NguonPdf>(@"
                 SELECT TOP 1 f.DuongDanLuuTru,f.MaBamSha256 FROM dbo.TepDinhKem f
@@ -216,27 +374,68 @@ public static class KySoEndpoints
             var(actor,error)=await permissions.YeuCau(http,"signing.sign");
             if(error!=null)return error;
             if(actor!.MaCoQuan is null)return Results.Forbid();
-            var stages=new Dictionary<string,(int Order,string Role)>{
-                ["KY_NHAY"]=(1,"TRUONG_PHONG"),["KY_LANH_DAO"]=(2,"LANH_DAO"),
-                ["KY_CO_QUAN"]=(3,"VAN_THU")};
+            var stages=new Dictionary<string,(int Order,string Role,string TaskStep)>{
+                ["KY_NHAY"]=(2,"TRUONG_PHONG","KIEM_TRA_NOI_DUNG"),
+                ["KY_THE_THUC"]=(3,"TRUONG_VAN_PHONG","KIEM_TRA_THE_THUC"),
+                ["KY_LANH_DAO"]=(4,"LANH_DAO","PHE_DUYET_LANH_DAO")};
             if(!stages.TryGetValue(request.LoaiChuKy??"",out var stage) || request.MaYeuCau==Guid.Empty)
                 return Results.BadRequest(new{message="Loại chữ ký hoặc MaYeuCau không hợp lệ."});
             using var cn=db.Open();await cn.OpenAsync();
             using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
-            var command="KY_"+stage.Order;
-            var old=await LayBienNhan(cn,tx,actor.MaCoQuan.Value,request.MaYeuCau,command);
-            if(old!=null){tx.Commit();return Results.Content(old,"application/json");}
-            if(!await CoVaiTro(cn,tx,actor,stage.Role)){
-                tx.Rollback();return Results.Forbid();
-            }
             if(!await KiemTraMatKhau(cn,tx,actor,request.MatKhau)){
                 tx.Rollback();return Results.BadRequest(new{message="Sai mật khẩu xác nhận ký."});
             }
             var doc=await LayVanBan(cn,tx,id,actor.MaCoQuan.Value);
             if(doc==null){tx.Rollback();return Results.NotFound();}
-            if(doc.TrangThai!="CHO_KY"){
-                tx.Rollback();return Results.Conflict(new{message="Văn bản không ở bước ký."});
+            if(doc.SoBuocKy is 3 or 4){
+                if(request.LoaiChuKy=="KY_THE_THUC" ||
+                   (doc.SoBuocKy==3 && request.LoaiChuKy=="KY_NHAY")){
+                    tx.Rollback();return Results.Conflict(new{message="Quy trình này không có bước ký nháy/thể thức riêng."});
+                }
+                if(request.LoaiChuKy=="KY_LANH_DAO")
+                    stage=(doc.SoBuocKy-1,"LANH_DAO","PHE_DUYET_LANH_DAO");
+                var selected=request.LoaiChuKy=="KY_NHAY"?doc.MaNguoiKyNhay:doc.MaNguoiKyLanhDao;
+                if(selected!=actor.MaNguoiDung){
+                    var proxyTask=await cn.QueryFirstOrDefaultAsync<Guid?>(@"
+                        SELECT TOP 1 t.MaTacVu FROM dbo.TacVuXuLy t
+                        WHERE t.MaVanBan=@id AND t.MaCoQuan=@agency
+                          AND t.MaNguoiDuocGiao=@selected AND t.Buoc=@step
+                          AND t.PhienBanDuocDuyet=@version AND t.TrangThai='CHO_XU_LY'",
+                        new{id,agency=actor.MaCoQuan,selected,step=stage.TaskStep,version=doc.PhienBanHienTai},tx);
+                    if(proxyTask==null || !await UyQuyenKyEndpoints.DangHieuLuc(cn,tx,proxyTask.Value,
+                        actor.MaCoQuan.Value,actor.MaNguoiDung,selected??0)){
+                        tx.Rollback();return Results.Forbid();
+                    }
+                }
             }
+            var command="KY_"+stage.Order;
+            var old=await LayBienNhan(cn,tx,actor.MaCoQuan.Value,request.MaYeuCau,command);
+            if(old!=null){tx.Commit();return Results.Content(old,"application/json");}
+            var authorizedRole=await CoVaiTro(cn,tx,actor,stage.Role);
+            if(doc.SoBuocKy is 4 or 5 && request.LoaiChuKy=="KY_NHAY")
+                authorizedRole=authorizedRole || await CoVaiTro(cn,tx,actor,"PHO_PHONG") ||
+                    await CoVaiTro(cn,tx,actor,"TRUONG_VAN_PHONG") ||
+                    await CoVaiTro(cn,tx,actor,"PHO_VAN_PHONG");
+            if(doc.SoBuocKy is 3 or 4 or 5 && request.LoaiChuKy=="KY_LANH_DAO")
+                authorizedRole=authorizedRole || await CoVaiTro(cn,tx,actor,"PHO_LANH_DAO");
+            if(!authorizedRole){
+                tx.Rollback();return Results.Forbid();
+            }
+            if(doc.TrangThai!="CHO_DUYET"){
+                tx.Rollback();return Results.Conflict(new{message="Văn bản phải ở bước chờ duyệt để ký theo cấp."});
+            }
+            var assigned=await cn.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(1) FROM dbo.TacVuXuLy t WITH(UPDLOCK,HOLDLOCK)
+                WHERE t.MaVanBan=@id AND t.MaCoQuan=@agency
+                  AND (t.MaNguoiDuocGiao=@user OR EXISTS(
+                    SELECT 1 FROM dbo.UyQuyenKyTacVu q WHERE q.MaTacVu=t.MaTacVu
+                      AND q.MaCoQuan=@agency AND q.MaNguoiGoc=t.MaNguoiDuocGiao
+                      AND q.MaNguoiDuocUyQuyen=@user AND q.DaThuHoi=0
+                      AND q.HieuLucTu<=SYSUTCDATETIME() AND q.HieuLucDen>SYSUTCDATETIME()))
+                  AND t.Buoc=@taskStep AND t.PhienBanDuocDuyet=@version AND t.TrangThai='CHO_XU_LY'",
+                new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,
+                    taskStep=stage.TaskStep,version=doc.PhienBanHienTai},tx);
+            if(assigned!=1){tx.Rollback();return Results.Forbid();}
             var previous=await LayBan(cn,tx,id,doc.PhienBanHienTai,stage.Order-1);
             if(previous==null){tx.Rollback();return Results.Conflict(new{message="Chưa đủ chữ ký theo thứ tự bắt buộc."});}
             var already=await LayBan(cn,tx,id,doc.PhienBanHienTai,stage.Order);
@@ -245,7 +444,12 @@ public static class KySoEndpoints
                !string.Equals(await DichVuKyPdf.Bam(previous.DuongDanLuuTru),previous.MaBamSha256,StringComparison.OrdinalIgnoreCase)){
                 tx.Rollback();return Results.Conflict(new{message="Bản PDF trước ký không toàn vẹn."});
             }
-            int? owner=stage.Order==3?null:actor.MaNguoiDung;
+            var priorSignatures=signer.XacMinh(previous.DuongDanLuuTru);
+            if(priorSignatures.Count!=stage.Order-1 || priorSignatures.Any(s=>!s.ToanVenMatMa) ||
+               !priorSignatures[^1].BaoPhuToanBoBanHienTai){
+                tx.Rollback();return Results.Conflict(new{message="Chuỗi chữ ký các cấp trước không hợp lệ."});
+            }
+            int? owner=actor.MaNguoiDung;
             var cert=await cn.QuerySingleOrDefaultAsync<ChungThuLuu>(@"
                 SELECT TOP 1 MaChungThu,MaCoQuan,MaNguoiSoHuu,DuongDanKhoaMaHoa,MaKhoaMaHoa,
                     ChungThuCongKhai,NguonChungThu
@@ -260,10 +464,12 @@ public static class KySoEndpoints
             }
             var fileId=Guid.NewGuid();
             var path=TaoDuongDan(config,actor.MaCoQuan.Value,id,fileId);
-            var field=$"Ky_{stage.Order}_{id:N}";
+            var field=$"Ky_{stage.Order}_{id:N}_v{doc.PhienBanHienTai}";
             try {
                 var signed=signer.Ky(previous.DuongDanLuuTru,path,field,cert.MaChungThu,
-                    actor.MaCoQuan.Value,owner,cert.DuongDanKhoaMaHoa,request.LoaiChuKy);
+                    actor.MaCoQuan.Value,owner,cert.DuongDanKhoaMaHoa,request.LoaiChuKy!,
+                    ViTriKy(request,request.LoaiChuKy switch{
+                        "KY_NHAY"=>"Ky nhay","KY_THE_THUC"=>"Kiem tra the thuc",_=>"Lanh dao"}));
                 var verified=signer.XacMinh(path);
                 if(verified.Count!=stage.Order || verified.Any(s=>!s.ToanVenMatMa) ||
                    !verified[^1].BaoPhuToanBoBanHienTai)
@@ -285,13 +491,12 @@ public static class KySoEndpoints
                         type=request.LoaiChuKy,cms=signed.DuLieuCms,publicCert=cert.ChungThuCongKhai,hash,
                         priorHash=previous.MaBamSha256,fileId,certId=cert.MaChungThu,field,
                         trust=cert.NguonChungThu=="TU_KY_THU_NGHIEM"?"INTERNAL_SELF_SIGNED":"CHUA_THAM_DINH_CA"},tx);
-                var next=stage.Order==3?"DA_KY":"CHO_KY";
-                await cn.ExecuteAsync("UPDATE dbo.VanBan SET TrangThai=@next WHERE MaVanBan=@id",new{id,next},tx);
+                const string next="CHO_DUYET";
                 await cn.ExecuteAsync(@"
                     INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,HanhDong,MoTa,TrangThaiTruoc,TrangThaiSau,SoPhienBan)
-                    VALUES(@id,@agency,@user,@type,@message,'CHO_KY',@next,@version)",
+                    VALUES(@id,@agency,@user,@type,@message,'CHO_DUYET',@next,@version)",
                     new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,type=request.LoaiChuKy,
-                        message=$"{actor.HoTen} ký số PDF; bước {stage.Order}/3, SHA-256 {hash[..16]}…",
+                        message=$"{actor.HoTen} ký số PDF; bước {stage.Order}/{doc.SoBuocKy}, SHA-256 {hash[..16]}…",
                         next,version=doc.PhienBanHienTai},tx);
                 var json=JsonSerializer.Serialize(new{maVanBan=id,loaiChuKy=request.LoaiChuKy,
                     trangThai=next,maBan=fileId,maBamSha256=hash,hopLeMatMa=true,
@@ -299,24 +504,112 @@ public static class KySoEndpoints
                 await GhiBienNhan(cn,tx,actor,request.MaYeuCau,command,json);
                 tx.Commit();return Results.Content(json,"application/json");
             }catch(Exception ex)when(ex is CryptographicException or InvalidDataException){
-                tx.Rollback();if(File.Exists(path))File.Delete(path);
+                tx.Rollback();XoaTepTam(path);
                 return Results.BadRequest(new{message="Không ký được PDF: "+ex.Message});
-            }catch{tx.Rollback();if(File.Exists(path))File.Delete(path);throw;}
+            }catch{tx.Rollback();XoaTepTam(path);throw;}
+        }).RequireAuthorization();
+
+        // v0.5.4: the fifth (agency) signature appends directly to the stage-4 PDF.
+        // Issue number stays in the immutable register; no PDF rewrite after signing stages 1-4.
+        app.MapPost("/api/v1/documents/{id:guid}/agency-signature",async(Guid id,KyVanBan request,
+            HttpContext http,PhanQuyen permissions,Database db,DichVuKyPdf signer,IConfiguration config)=>{
+            var(actor,error)=await permissions.YeuCau(http,"signing.sign");
+            if(error!=null)return error;
+            if(actor!.MaCoQuan is null)return Results.Forbid();
+            if(request.MaYeuCau==Guid.Empty || request.LoaiChuKy!="KY_CO_QUAN")
+                return Results.BadRequest(new{message="Loại chữ ký hoặc MaYeuCau không hợp lệ."});
+            using var cn=db.Open();await cn.OpenAsync();
+            using var tx=cn.BeginTransaction(System.Data.IsolationLevel.Serializable);
+            if(!await CoVaiTro(cn,tx,actor,"VAN_THU")){
+                tx.Rollback();return Results.Forbid();
+            }
+            if(!await KiemTraMatKhau(cn,tx,actor,request.MatKhau)){
+                tx.Rollback();return Results.BadRequest(new{message="Sai mật khẩu xác nhận ký cơ quan."});
+            }
+            var doc=await LayVanBan(cn,tx,id,actor.MaCoQuan.Value);
+            if(doc==null){tx.Rollback();return Results.NotFound();}
+            if(doc.TrangThai!="DA_CAP_SO" || doc.SoPhatHanh is null || string.IsNullOrWhiteSpace(doc.KyHieu)){
+                tx.Rollback();return Results.Conflict(new{message="Văn bản chưa được cấp số và ký hiệu."});
+            }
+            var agencyOrder=doc.SoBuocKy;
+            var old=await LayBienNhan(cn,tx,actor.MaCoQuan.Value,request.MaYeuCau,"KY_"+agencyOrder);
+            if(old!=null){tx.Commit();return Results.Content(old,"application/json");}
+            if(await LayBan(cn,tx,id,doc.PhienBanHienTai,agencyOrder)!=null){
+                tx.Rollback();return Results.Conflict(new{message="Chứng thư cơ quan đã ký phiên bản này."});
+            }
+            var prior=await LayBan(cn,tx,id,doc.PhienBanHienTai,agencyOrder-1);
+            if(prior==null || !File.Exists(prior.DuongDanLuuTru) ||
+               !string.Equals(await DichVuKyPdf.Bam(prior.DuongDanLuuTru),prior.MaBamSha256,StringComparison.OrdinalIgnoreCase)){
+                tx.Rollback();return Results.Conflict(new{message="Không có PDF bốn chữ ký hợp lệ."});
+            }
+            var earlier=signer.XacMinh(prior.DuongDanLuuTru);
+            if(earlier.Count!=agencyOrder-1 || earlier.Any(s=>!s.ToanVenMatMa) || !earlier[^1].BaoPhuToanBoBanHienTai){
+                tx.Rollback();return Results.Conflict(new{message="Bốn chữ ký trước chưa toàn vẹn."});
+            }
+            var cert=await cn.QuerySingleOrDefaultAsync<ChungThuLuu>(@"
+                SELECT TOP 1 MaChungThu,MaCoQuan,MaNguoiSoHuu,DuongDanKhoaMaHoa,MaKhoaMaHoa,
+                    ChungThuCongKhai,NguonChungThu FROM dbo.ChungThuKy
+                WHERE MaCoQuan=@agency AND MaNguoiSoHuu IS NULL AND LoaiChungThu='CO_QUAN'
+                    AND DangHoatDong=1 AND NgayHieuLuc<=SYSUTCDATETIME()
+                    AND NgayHetHan>SYSUTCDATETIME() ORDER BY ThoiDiemTao DESC",
+                new{agency=actor.MaCoQuan},tx);
+            if(cert==null){tx.Rollback();return Results.Conflict(new{message="Cơ quan chưa có chứng thư số đang hoạt động."});}
+            if(cert.MaKhoaMaHoa!=signer.MaKhoa()){
+                tx.Rollback();return Results.Conflict(new{message="Khóa mã hóa chứng thư không đúng bộ khóa hiện tại."});
+            }
+            var fileId=Guid.NewGuid();var path=TaoDuongDan(config,actor.MaCoQuan.Value,id,fileId);
+            var field=$"Ky_{agencyOrder}_{id:N}_v{doc.PhienBanHienTai}";
+            try{
+                var signed=signer.Ky(prior.DuongDanLuuTru,path,field,cert.MaChungThu,
+                    actor.MaCoQuan.Value,null,cert.DuongDanKhoaMaHoa,"KY_CO_QUAN",
+                    ViTriKy(request,$"So: {doc.SoPhatHanh}/{doc.KyHieu}",true));
+                var checks=signer.XacMinh(path);
+                if(checks.Count!=agencyOrder || checks.Any(s=>!s.ToanVenMatMa) || !checks[^1].BaoPhuToanBoBanHienTai)
+                    throw new CryptographicException("Chuỗi chữ ký PDF không toàn vẹn.");
+                var hash=await DichVuKyPdf.Bam(path);
+                await cn.ExecuteAsync(@"
+                    INSERT dbo.BanPdfDaKy(MaBan,MaVanBan,MaCoQuan,SoPhienBan,ThuTuKy,MaBanTruoc,
+                        DuongDanLuuTru,MaBamSha256,TenTruongKy)
+                    VALUES(@fileId,@id,@agency,@version,@order,@prior,@path,@hash,@field)",
+                    new{fileId,id,agency=actor.MaCoQuan,version=doc.PhienBanHienTai,
+                        order=agencyOrder,prior=prior.MaBan,path,hash,field},tx);
+                await cn.ExecuteAsync(@"
+                    INSERT dbo.ChuKySo(MaVanBan,MaCoQuan,MaNguoiKy,SoPhienBan,LoaiChuKy,DinhDangChuKy,
+                        DuLieuChuKy,ChungThuCongKhai,MaBamTaiLieu,MaBamChuKyTruoc,KetQuaXacMinh,
+                        MucDoTinCay,MaBanDaKy,MaChungThu,TenTruongKy)
+                    VALUES(@id,@agency,@user,@version,'KY_CO_QUAN','PADES_CMS',@cms,@publicCert,
+                        @hash,@priorHash,'HOP_LE_MAT_MA',@trust,@fileId,@certId,@field)",
+                    new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,version=doc.PhienBanHienTai,
+                        cms=signed.DuLieuCms,publicCert=cert.ChungThuCongKhai,hash,priorHash=prior.MaBamSha256,
+                        fileId,certId=cert.MaChungThu,field,
+                        trust=cert.NguonChungThu=="TU_KY_THU_NGHIEM"?"INTERNAL_SELF_SIGNED":"CHUA_THAM_DINH_CA"},tx);
+                await cn.ExecuteAsync("UPDATE dbo.VanBan SET TrangThai='DA_KY',ThoiDiemCapNhat=SYSUTCDATETIME() WHERE MaVanBan=@id",new{id},tx);
+                await cn.ExecuteAsync(@"
+                    INSERT dbo.LichSuVanBan(MaVanBan,MaCoQuan,MaNguoiThucHien,HanhDong,MoTa,TrangThaiTruoc,TrangThaiSau,SoPhienBan)
+                    VALUES(@id,@agency,@user,'KY_CO_QUAN',@description,'DA_CAP_SO','DA_KY',@version)",
+                    new{id,agency=actor.MaCoQuan,user=actor.MaNguoiDung,version=doc.PhienBanHienTai,
+                        description=$"Đã ký PDF bước {agencyOrder}/{agencyOrder}; số {doc.SoPhatHanh}/{doc.KyHieu}; SHA-256 {hash[..16]}…"},tx);
+                var json=JsonSerializer.Serialize(new{maVanBan=id,trangThai="DA_KY",loaiChuKy="KY_CO_QUAN",
+                    maBan=fileId,so=doc.SoPhatHanh,kyHieu=doc.KyHieu,maBamSha256=hash,hopLeMatMa=true});
+                await GhiBienNhan(cn,tx,actor,request.MaYeuCau,"KY_"+agencyOrder,json);
+                tx.Commit();return Results.Content(json,"application/json");
+            }catch(Exception ex)when(ex is CryptographicException or InvalidDataException){
+                tx.Rollback();XoaTepTam(path);
+                return Results.BadRequest(new{message="Không ký được PDF cơ quan: "+ex.Message});
+            }catch{tx.Rollback();XoaTepTam(path);throw;}
         }).RequireAuthorization();
 
         app.MapGet("/api/v1/documents/{id:guid}/signatures/verification",async(Guid id,
             HttpContext http,PhanQuyen permissions,Database db,DichVuKyPdf signer)=>{
             var(actor,error)=await permissions.YeuCau(http,"documents.read");
             if(error!=null)return error;
+            // Dùng cùng SQL scope với GET /documents/{id}, ngay trong truy vấn tải.
             using var cn=db.Open();
             var pdf=await cn.QueryFirstOrDefaultAsync<BanPdf>(@"
                 SELECT TOP 1 p.MaBan,p.DuongDanLuuTru,p.MaBamSha256
                 FROM dbo.BanPdfDaKy p JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
-                WHERE p.MaVanBan=@id AND p.MaCoQuan=@agency AND v.DoMat='THUONG'
-                  AND (v.MaNguoiTao=@user OR EXISTS(SELECT 1 FROM dbo.NguoiDungVaiTro uv
-                      JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro
-                      WHERE uv.MaNguoiDung=@user AND uv.MaCoQuan=@agency
-                        AND r.MaDinhDanh IN ('TRUONG_PHONG','LANH_DAO','VAN_THU')))
+                WHERE p.MaVanBan=@id AND p.MaCoQuan=@agency AND v.MaCoQuan=@agency
+                  AND p.SoPhienBan=v.PhienBanHienTai" + VanBanEndpoints.PhamViVanBan + @"
                 ORDER BY p.ThuTuKy DESC",new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung});
             if(pdf==null || !File.Exists(pdf.DuongDanLuuTru))return Results.NotFound();
             var sha=await DichVuKyPdf.Bam(pdf.DuongDanLuuTru);
@@ -334,10 +627,8 @@ public static class KySoEndpoints
             var pdf=await cn.QueryFirstOrDefaultAsync<BanPdf>(@"
                 SELECT TOP 1 p.MaBan,p.DuongDanLuuTru,p.MaBamSha256 FROM dbo.BanPdfDaKy p
                 JOIN dbo.VanBan v ON v.MaVanBan=p.MaVanBan
-                WHERE p.MaVanBan=@id AND v.MaCoQuan=@agency AND v.DoMat='THUONG'
-                AND (v.MaNguoiTao=@user OR EXISTS(SELECT 1 FROM dbo.NguoiDungVaiTro uv
-                   JOIN dbo.VaiTro r ON r.MaVaiTro=uv.MaVaiTro WHERE uv.MaNguoiDung=@user
-                   AND uv.MaCoQuan=@agency AND r.MaDinhDanh IN ('TRUONG_PHONG','LANH_DAO','VAN_THU')))
+                WHERE p.MaVanBan=@id AND p.MaCoQuan=@agency AND v.MaCoQuan=@agency
+                  AND p.SoPhienBan=v.PhienBanHienTai" + VanBanEndpoints.PhamViVanBan + @"
                 ORDER BY p.ThuTuKy DESC",new{id,agency=actor!.MaCoQuan,user=actor.MaNguoiDung});
             if(pdf==null || !File.Exists(pdf.DuongDanLuuTru))return Results.NotFound();
             if(await DichVuKyPdf.Bam(pdf.DuongDanLuuTru)!=pdf.MaBamSha256)
